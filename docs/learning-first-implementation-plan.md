@@ -2,9 +2,9 @@
 
 ## Project Status
 
-- Current milestone: Repository foundation
-- Next milestone: Checkpoint 0 — Environment and Project Foundation
-- Implementation status: Not started
+- Current milestone: Checkpoint 0 — Environment and Project Foundation
+- Next milestone: Complete live Ollama and model validation
+- Implementation status: Deterministic foundation complete; live validation pending
 
 ## Summary
 
