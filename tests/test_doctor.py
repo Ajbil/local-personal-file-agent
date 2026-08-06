@@ -20,7 +20,7 @@ class HealthyGateway:
         return "0.32.6"
 
     def model_names(self) -> set[str]:
-        return {"embeddinggemma", "qwen3.5:4b"}
+        return {"embeddinggemma:latest", "qwen3.5:4b"}
 
     def embedding_probe(self, model: str) -> EmbeddingProbe:
         assert model == "embeddinggemma"
@@ -99,6 +99,18 @@ def test_missing_models_produce_actionable_failures() -> None:
     assert failures["model_inventory"].details["missing"] == "embeddinggemma, qwen3.5:4b"
     assert "embedding_smoke" in failures
     assert "generation_smoke" in failures
+
+
+def test_latest_alias_does_not_match_an_explicit_different_tag() -> None:
+    class WrongTagGateway(HealthyGateway):
+        def model_names(self) -> set[str]:
+            return {"embeddinggemma:latest", "qwen3.5:2b"}
+
+    report = run_doctor(Settings(), WrongTagGateway())
+
+    inventory = next(check for check in report.checks if check.name == "model_inventory")
+    assert inventory.status is CheckStatus.FAIL
+    assert inventory.details["missing"] == "qwen3.5:4b"
 
 
 def test_skip_generation_does_not_claim_full_readiness() -> None:

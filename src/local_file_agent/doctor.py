@@ -47,6 +47,14 @@ def _finalize(checks: list[CheckResult], *, full_readiness: bool) -> DoctorRepor
     return DoctorReport(success=success, full_readiness=success and full_readiness, checks=checks)
 
 
+def _model_is_installed(requested_model: str, installed_models: set[str]) -> bool:
+    """Treat Ollama's implicit ``:latest`` tag as equivalent to an untagged request."""
+
+    return requested_model in installed_models or (
+        ":" not in requested_model and f"{requested_model}:latest" in installed_models
+    )
+
+
 def run_doctor(
     settings: Settings,
     gateway: OllamaGateway,
@@ -94,8 +102,9 @@ def run_doctor(
         checks.append(_result("model_inventory", CheckStatus.FAIL, str(exc)))
         return _finalize(checks, full_readiness=False)
 
+    required_models = {settings.answer_model, settings.embedding_model}
     missing_models = sorted(
-        {settings.answer_model, settings.embedding_model}.difference(installed_models)
+        model for model in required_models if not _model_is_installed(model, installed_models)
     )
     if missing_models:
         checks.append(
@@ -117,7 +126,7 @@ def run_doctor(
             )
         )
 
-    if settings.embedding_model in installed_models:
+    if _model_is_installed(settings.embedding_model, installed_models):
         try:
             embedding_probe = gateway.embedding_probe(settings.embedding_model)
             checks.append(
@@ -150,7 +159,7 @@ def run_doctor(
                 "Generation smoke test was skipped; full readiness is not proven",
             )
         )
-    elif settings.answer_model in installed_models:
+    elif _model_is_installed(settings.answer_model, installed_models):
         try:
             generation_probe = gateway.generation_probe(settings.answer_model)
             generation_completed = True

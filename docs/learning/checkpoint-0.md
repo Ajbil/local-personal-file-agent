@@ -14,7 +14,9 @@ Create a reproducible Python foundation and prove whether the local Ollama runti
 | Python | CPython 3.12.10 |
 | uv | 0.12.0 |
 | NVIDIA runtime | Not detected |
-| Ollama | Installation attempted through WinGet but timed out; live validation pending |
+| Ollama | 0.32.6; loopback API validated |
+| EmbeddingGemma | Installed as `embeddinggemma:latest`; live smoke test passed |
+| Qwen 3.5 4B | Download and live generation validation pending |
 
 CPU execution is the compatibility baseline. GPU acceleration will only be claimed if Ollama reports VRAM allocation.
 
@@ -33,18 +35,23 @@ CPU execution is the compatibility baseline. GPU acceleration will only be claim
 ```text
 Ruff: passed
 mypy strict mode: passed
-pytest: 32 passed
-coverage: 95.99%
+pytest: 33 passed
+coverage: 96.02%
 ```
 
-Live values still to record after Ollama is operational:
+Live values recorded:
 
-- Ollama version.
-- Installed model names.
-- Embedding dimension.
-- Embedding load and total duration.
+- Ollama version: `0.32.6`.
+- Installed embedding model: `embeddinggemma:latest`.
+- Embedding dimension: `768`.
+- Cold embedding load duration: `9,379.039 ms`.
+- Cold embedding total duration: `10,088.954 ms`.
+- Reported VRAM allocation: `0` bytes; CPU execution is active.
+
+Live values still to record:
+
 - Qwen load and total duration.
-- Reported VRAM allocation or CPU-only warning.
+- Successful schema-constrained Qwen response.
 
 ## Important Concepts
 
