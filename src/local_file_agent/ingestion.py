@@ -59,6 +59,7 @@ class Document:
     normalization, never to byte offsets in the source file.
     """
 
+    document_id: str
     relative_path: str
     text: str
     size_bytes: int
@@ -69,6 +70,7 @@ class Document:
 class AcceptedFile(BaseModel):
     """Privacy-safe metadata for one accepted document."""
 
+    document_id: str
     relative_path: str
     size_bytes: int = Field(ge=0)
     character_count: int = Field(ge=0)
@@ -153,6 +155,12 @@ def _same_file_state(first: os.stat_result, second: os.stat_result) -> bool:
     )
 
 
+def document_id_for(relative_path: str) -> str:
+    """Create a path-stable identity for a document within one approved source."""
+
+    return hashlib.sha256(relative_path.encode("utf-8")).hexdigest()
+
+
 def _parse_candidate(
     path: Path,
     root: Path,
@@ -200,6 +208,7 @@ def _parse_candidate(
     normalized = decoded.replace("\r\n", "\n").replace("\r", "\n")
     content_hash = hashlib.sha256(normalized.encode("utf-8")).hexdigest()
     return Document(
+        document_id=document_id_for(relative_path),
         relative_path=relative_path,
         text=normalized,
         size_bytes=len(raw),
@@ -284,6 +293,7 @@ def scan_source(
 
     accepted = [
         AcceptedFile(
+            document_id=document.document_id,
             relative_path=document.relative_path,
             size_bytes=document.size_bytes,
             character_count=document.character_count,

@@ -14,6 +14,7 @@ from local_file_agent.ingestion import (
     SkipReason,
     SourceRootError,
     _parse_candidate,
+    document_id_for,
     scan_source,
 )
 
@@ -32,11 +33,13 @@ def test_valid_documents_are_normalized_hashed_and_sorted(tmp_path: Path) -> Non
     ]
     first, second = outcome.documents
     assert first.text == "# Title\n\nBody\n"
+    assert first.document_id == document_id_for("Nested/A.md")
     assert first.character_count == len(first.text)
     assert first.content_sha256 == hashlib.sha256(first.text.encode("utf-8")).hexdigest()
     assert second.text == "first\nsecond"
     assert outcome.report.summary.accepted_files == 2
     assert outcome.report.summary.skipped_entries == 0
+    assert outcome.report.accepted[0].document_id == first.document_id
 
 
 def test_same_normalized_text_has_same_hash_for_different_line_endings(tmp_path: Path) -> None:
