@@ -6,7 +6,9 @@ The project is developed checkpoint by checkpoint so document ingestion, chunkin
 
 ## Current Status
 
-**Checkpoint 0 - Environment and Project Foundation:** deterministic implementation complete; live Ollama/model validation pending.
+**Checkpoint 0 - Environment and Project Foundation:** complete. The locked Python environment, loopback Ollama runtime, EmbeddingGemma, and Qwen 3.5 4B have passed deterministic and live validation.
+
+**Next:** review and merge the Checkpoint 0 pull request, then begin Checkpoint 1 - Secure File Discovery and Parsing.
 
 Implemented:
 

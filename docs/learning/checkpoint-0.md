@@ -16,7 +16,7 @@ Create a reproducible Python foundation and prove whether the local Ollama runti
 | NVIDIA runtime | Not detected |
 | Ollama | 0.32.6; loopback API validated |
 | EmbeddingGemma | Installed as `embeddinggemma:latest`; live smoke test passed |
-| Qwen 3.5 4B | Download and live generation validation pending |
+| Qwen 3.5 4B | Installed; live schema-constrained generation passed |
 
 CPU execution is the compatibility baseline. GPU acceleration will only be claimed if Ollama reports VRAM allocation.
 
@@ -44,14 +44,12 @@ Live values recorded:
 - Ollama version: `0.32.6`.
 - Installed embedding model: `embeddinggemma:latest`.
 - Embedding dimension: `768`.
-- Cold embedding load duration: `9,379.039 ms`.
-- Cold embedding total duration: `10,088.954 ms`.
+- Embedding load duration: `4,218.384 ms`.
+- Embedding total duration: `4,418.684 ms`.
+- Qwen load duration: `26,204.793 ms`.
+- Qwen total duration: `154,348.501 ms`.
 - Reported VRAM allocation: `0` bytes; CPU execution is active.
-
-Live values still to record:
-
-- Qwen load and total duration.
-- Successful schema-constrained Qwen response.
+- Qwen structured output: schema-valid JSON accepted by Pydantic.
 
 ## Important Concepts
 
@@ -71,17 +69,16 @@ Normal tests replace the external model runtime with controlled fakes. This prov
 
 The application rejects non-loopback Ollama URLs. This reduces the risk that personal text is accidentally sent across a LAN or to a remote host through configuration.
 
-## Remaining Gate
+## Completion Gate
 
-Checkpoint 0 remains in progress until all of the following succeed:
+Checkpoint 0 completed successfully with:
 
 ```powershell
-ollama pull embeddinggemma
-ollama pull qwen3.5:4b
+uv sync --locked
 uv run file-agent doctor
 ```
 
-After the live report succeeds, record its safe timing/dimension metadata here and mark the checkpoint complete in the main roadmap.
+The final doctor report passed Python, loopback configuration, Ollama connectivity, model inventory, 768-dimensional embedding generation, and schema-constrained Qwen generation. Ollama reported CPU execution as a non-blocking performance warning.
 
 ## Explain-Back Questions
 

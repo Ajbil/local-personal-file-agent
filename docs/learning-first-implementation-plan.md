@@ -2,9 +2,9 @@
 
 ## Project Status
 
-- Current milestone: Checkpoint 0 — Environment and Project Foundation
-- Next milestone: Complete live Ollama and model validation
-- Implementation status: Deterministic foundation complete; live validation pending
+- Current milestone: Checkpoint 0 — Environment and Project Foundation (complete)
+- Next milestone: Checkpoint 1 — Secure File Discovery and Parsing
+- Implementation status: Checkpoint 0 passed deterministic and live validation
 
 ## Summary
 
