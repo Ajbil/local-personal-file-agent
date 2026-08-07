@@ -2,9 +2,9 @@
 
 ## Project Status
 
-- Current milestone: Checkpoint 0 — Environment and Project Foundation (complete)
-- Next milestone: Checkpoint 1 — Secure File Discovery and Parsing
-- Implementation status: Checkpoint 0 passed deterministic and live validation
+- Current milestone: Checkpoint 1 — Secure File Discovery and Parsing (complete)
+- Next milestone: Checkpoint 2 — Deterministic Chunking
+- Implementation status: Checkpoint 1 passed deterministic, security, privacy, and regression validation
 
 ## Summary
 
@@ -28,6 +28,7 @@ Estimated learning effort: roughly 10–12 focused sessions or 15–25 hours, de
 The application will expose these commands:
 
 - `file-agent doctor`: validate Python, Ollama connectivity, model availability, embedding dimensions, and generation.
+- `file-agent scan --source <folder>`: securely discover and parse approved Markdown and text files without persisting or printing their contents.
 - `file-agent index --source <folder> --db <database>`: safely discover, parse, chunk, embed, and index documents.
 - `file-agent search "<question>" --db <database>`: display ranked chunks, similarity scores, and trusted citations without using Qwen.
 - `file-agent ask "<question>" --db <database>`: retrieve evidence and generate a cited answer.

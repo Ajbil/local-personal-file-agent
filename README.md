@@ -6,9 +6,9 @@ The project is developed checkpoint by checkpoint so document ingestion, chunkin
 
 ## Current Status
 
-**Checkpoint 0 - Environment and Project Foundation:** complete. The locked Python environment, loopback Ollama runtime, EmbeddingGemma, and Qwen 3.5 4B have passed deterministic and live validation.
+**Checkpoint 1 - Secure File Discovery and Parsing:** complete. The application can securely scan one explicitly approved folder and turn supported UTF-8 Markdown and text files into trusted, normalized documents.
 
-**Next:** review and merge the Checkpoint 0 pull request, then begin Checkpoint 1 - Secure File Discovery and Parsing.
+**Next:** review and merge the Checkpoint 1 pull request, then begin Checkpoint 2 - Deterministic Chunking.
 
 Implemented:
 
@@ -17,8 +17,11 @@ Implemented:
 - Direct and validated Ollama HTTP boundary.
 - `file-agent doctor` human and JSON diagnostics.
 - Deterministic tests that do not require installed models.
+- Recursive, deterministic discovery under an explicitly approved source root.
+- UTF-8 parsing, line-ending normalization, stable content hashes, and safe rejection reasons.
+- Metadata-only `file-agent scan` human and JSON reports.
 
-Not implemented yet: file discovery, chunking, indexing, retrieval, or user-document processing.
+Not implemented yet: chunking, embedding generation, indexing, retrieval, or answer generation.
 
 ## Mental Model
 
@@ -36,6 +39,17 @@ Python application
 ```
 
 Python runs our code. `uv` reproduces its environment. Ollama is a separate local service that loads and runs the models.
+
+The Checkpoint 1 ingestion boundary runs before any model operation:
+
+```text
+Approved source folder
+    |
+    +-- secure discovery and validation
+            |
+            +-- trusted normalized Documents (internal)
+            +-- privacy-safe metadata report (terminal / JSON)
+```
 
 ## Prerequisites
 
@@ -91,6 +105,23 @@ uv run file-agent doctor --skip-generation
 
 This may succeed without claiming `full_readiness=true`.
 
+## Scan Approved Documents
+
+Start with the committed synthetic sample rather than personal documents:
+
+```powershell
+uv run file-agent scan --source examples/checkpoint-1/source
+```
+
+Machine-readable metadata:
+
+```powershell
+uv run file-agent scan --source examples/checkpoint-1/source --json
+```
+
+The source option is mandatory. Scanning is recursive, accepts only UTF-8 `.md` and `.txt` files,
+and never prints document content. Source files are read-only and nothing is persisted yet.
+
 ## Configuration
 
 Safe defaults are shown in [.env.example](.env.example). Supported variables:
@@ -128,6 +159,7 @@ Normal tests mock the Ollama HTTP boundary, which keeps them fast and determinis
 
 - [Learning-first implementation plan](docs/learning-first-implementation-plan.md)
 - [Checkpoint 0 learning record](docs/learning/checkpoint-0.md)
+- [Checkpoint 1 learning record](docs/learning/checkpoint-1.md)
 - [Architecture decision: direct local Ollama boundary](docs/decisions/0001-direct-local-ollama-boundary.md)
 - [Original Notion guide](Local%20Personal%20File%20Agent%20060c2786553b82208d268122f958b13d.md)
 - [Persistent collaboration guidance](AGENTS.md)

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Annotated
 
 import typer
@@ -9,6 +10,7 @@ from pydantic import ValidationError
 
 from local_file_agent.config import Settings
 from local_file_agent.doctor import DoctorReport, run_doctor
+from local_file_agent.ingestion import ScanReport, SourceRootError, scan_source
 from local_file_agent.ollama import OllamaClient
 
 app = typer.Typer(
@@ -39,6 +41,28 @@ def _safe_validation_messages(exc: ValidationError) -> list[str]:
         location = ".".join(str(part) for part in error["loc"])
         messages.append(f"{location}: {error['msg']}")
     return messages
+
+
+def _render_scan_report(report: ScanReport) -> None:
+    typer.echo(f"Scan completed for approved source: {report.source_name}")
+    typer.echo(f"Accepted files: {report.summary.accepted_files}")
+    typer.echo(f"Skipped entries: {report.summary.skipped_entries}")
+
+    if report.accepted:
+        typer.echo("\nAccepted metadata:")
+        for accepted in report.accepted:
+            typer.echo(
+                f"- {accepted.relative_path} "
+                f"(bytes={accepted.size_bytes}, chars={accepted.character_count}, "
+                f"sha256={accepted.content_sha256[:12]}...)"
+            )
+
+    if report.skipped:
+        typer.echo("\nSkipped entries:")
+        for skipped in report.skipped:
+            typer.echo(f"- {skipped.relative_path} [{skipped.reason.value}]")
+
+    typer.echo("\nNo document content was printed or persisted.")
 
 
 @app.command()
@@ -72,3 +96,28 @@ def doctor(
 
     if not report.success:
         raise typer.Exit(code=1)
+
+
+@app.command()
+def scan(
+    source: Annotated[
+        Path,
+        typer.Option("--source", help="Explicitly approved folder to scan recursively."),
+    ],
+    json_output: Annotated[
+        bool,
+        typer.Option("--json", help="Emit a machine-readable metadata-only report."),
+    ] = False,
+) -> None:
+    """Securely discover and parse approved Markdown and text files."""
+
+    try:
+        outcome = scan_source(source)
+    except SourceRootError as exc:
+        typer.echo(f"Source folder rejected: {exc}", err=True)
+        raise typer.Exit(code=1) from exc
+
+    if json_output:
+        typer.echo(outcome.report.model_dump_json(indent=2))
+    else:
+        _render_scan_report(outcome.report)

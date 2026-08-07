@@ -1,0 +1,3 @@
+Decision: begin with Markdown and plain-text files.
+
+Reason: a narrow input contract is easier to understand, secure, and test.
