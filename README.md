@@ -6,9 +6,9 @@ The project is developed checkpoint by checkpoint so document ingestion, chunkin
 
 ## Current Status
 
-**Checkpoint 1 - Secure File Discovery and Parsing:** complete. The application can securely scan one explicitly approved folder and turn supported UTF-8 Markdown and text files into trusted, normalized documents.
+**Checkpoint 2 - Deterministic Chunking:** complete. Trusted normalized documents can now be divided into stable, overlapping, exact-offset passages for future embeddings and citations.
 
-**Next:** review and merge the Checkpoint 1 pull request, then begin Checkpoint 2 - Deterministic Chunking.
+**Next:** review and merge the Checkpoint 2 pull request, then begin Checkpoint 3 - Local Embeddings.
 
 Implemented:
 
@@ -20,8 +20,11 @@ Implemented:
 - Recursive, deterministic discovery under an explicitly approved source root.
 - UTF-8 parsing, line-ending normalization, stable content hashes, and safe rejection reasons.
 - Metadata-only `file-agent scan` human and JSON reports.
+- Stable path-derived document identities.
+- Deterministic character chunking with natural-boundary preference and exact source offsets.
+- Privacy-aware `file-agent inspect-chunks` human and JSON reports.
 
-Not implemented yet: chunking, embedding generation, indexing, retrieval, or answer generation.
+Not implemented yet: embedding generation, indexing, retrieval, or answer generation.
 
 ## Mental Model
 
@@ -122,6 +125,29 @@ uv run file-agent scan --source examples/checkpoint-1/source --json
 The source option is mandatory. Scanning is recursive, accepts only UTF-8 `.md` and `.txt` files,
 and never prints document content. Source files are read-only and nothing is persisted yet.
 
+## Inspect Deterministic Chunks
+
+Inspect chunk metadata for the synthetic learning document:
+
+```powershell
+uv run file-agent inspect-chunks `
+  --source examples/checkpoint-2/source `
+  --document long-rag-note.md
+```
+
+Use custom settings for learning experiments:
+
+```powershell
+uv run file-agent inspect-chunks `
+  --source examples/checkpoint-2/source `
+  --document long-rag-note.md `
+  --chunk-size 500 `
+  --overlap 100
+```
+
+The inspector prints offsets and hashes but no text by default. Add `--show-text` only for files
+whose contents you deliberately want in terminal output. Add `--json` for machine-readable output.
+
 ## Configuration
 
 Safe defaults are shown in [.env.example](.env.example). Supported variables:
@@ -160,6 +186,7 @@ Normal tests mock the Ollama HTTP boundary, which keeps them fast and determinis
 - [Learning-first implementation plan](docs/learning-first-implementation-plan.md)
 - [Checkpoint 0 learning record](docs/learning/checkpoint-0.md)
 - [Checkpoint 1 learning record](docs/learning/checkpoint-1.md)
+- [Checkpoint 2 learning record](docs/learning/checkpoint-2.md)
 - [Architecture decision: direct local Ollama boundary](docs/decisions/0001-direct-local-ollama-boundary.md)
 - [Original Notion guide](Local%20Personal%20File%20Agent%20060c2786553b82208d268122f958b13d.md)
 - [Persistent collaboration guidance](AGENTS.md)

@@ -1,0 +1,1 @@
+This short synthetic note should remain a single chunk with the default configuration.
