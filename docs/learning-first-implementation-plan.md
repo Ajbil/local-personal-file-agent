@@ -2,9 +2,9 @@
 
 ## Project Status
 
-- Current milestone: Repository foundation
-- Next milestone: Checkpoint 0 — Environment and Project Foundation
-- Implementation status: Not started
+- Current milestone: Checkpoint 0 — Environment and Project Foundation (complete)
+- Next milestone: Checkpoint 1 — Secure File Discovery and Parsing
+- Implementation status: Checkpoint 0 passed deterministic and live validation
 
 ## Summary
 
