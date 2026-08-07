@@ -161,6 +161,9 @@ Text is omitted from JSON unless `--show-text` is also supplied.
 
 ## Learning experiments
 
+The [Checkpoint 2 manual verification guide](../testing/checkpoint-2.md) provides the complete
+copy-pasteable lab, expected outputs, offset proof, overlap proof, and failure experiments.
+
 ### Compare overlap
 
 ```powershell

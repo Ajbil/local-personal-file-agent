@@ -20,6 +20,8 @@ Build a local personal-file Retrieval-Augmented Generation (RAG) agent while usi
 - Add tests alongside each checkpoint, including important failure and security cases.
 - Keep commits small and scoped to one understood milestone.
 - At the end of a checkpoint, summarize what was built, what was learned, remaining limitations, and a short set of questions or experiments the owner can use to verify understanding.
+- Add or update `docs/testing/checkpoint-N.md` at the end of every checkpoint. Include prerequisites, copy-pasteable PowerShell commands, expected behavior, interpretation, safe failure/privacy experiments, and automated quality checks so another learner can independently verify the milestone.
+- Keep committed synthetic inputs under `examples/checkpoint-N/` and use the Git-ignored `.data/` directory for disposable manual-testing artifacts. Do not place testing instructions inside `examples/`.
 - Preserve user-authored or unrelated changes and ask before destructive or externally visible actions.
 
 ## Baseline Decisions
@@ -38,6 +40,6 @@ Build a local personal-file Retrieval-Augmented Generation (RAG) agent while usi
 ## Sources of Truth
 
 - Learning and implementation roadmap: `docs/learning-first-implementation-plan.md`
+- Manual checkpoint verification index: `docs/testing/README.md`
 - Original Notion export: `Local Personal File Agent 060c2786553b82208d268122f958b13d.md`
 - Future usage and setup instructions: `README.md`
-

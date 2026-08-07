@@ -80,6 +80,8 @@ uv run file-agent doctor
 
 The final doctor report passed Python, loopback configuration, Ollama connectivity, model inventory, 768-dimensional embedding generation, and schema-constrained Qwen generation. Ollama reported CPU execution as a non-blocking performance warning.
 
+For a complete reproducible lab, follow the [Checkpoint 0 manual verification guide](../testing/checkpoint-0.md).
+
 ## Explain-Back Questions
 
 1. Why are Python, `uv`, Ollama, EmbeddingGemma, and Qwen separate components?
