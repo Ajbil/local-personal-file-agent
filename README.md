@@ -8,7 +8,7 @@ The project is developed checkpoint by checkpoint so document ingestion, chunkin
 
 **Checkpoint 2 - Deterministic Chunking:** complete. Trusted normalized documents can now be divided into stable, overlapping, exact-offset passages for future embeddings and citations.
 
-**Next:** review and merge the Checkpoint 2 pull request, then begin Checkpoint 3 - Local Embeddings.
+**Next:** begin Checkpoint 3 - Local Embeddings.
 
 Implemented:
 
@@ -172,6 +172,18 @@ uv run pytest --cov=local_file_agent --cov-report=term-missing
 ```
 
 Normal tests mock the Ollama HTTP boundary, which keeps them fast and deterministic. Live model validation is performed through `file-agent doctor` and future tests marked `live`.
+
+## Manual Checkpoint Verification
+
+Every completed checkpoint includes a repeatable PowerShell lab with expected output,
+interpretation, safe failure experiments, privacy checks, and automated validation:
+
+- [Checkpoint 0 — Environment and runtime readiness](docs/testing/checkpoint-0.md)
+- [Checkpoint 1 — Secure file discovery and parsing](docs/testing/checkpoint-1.md)
+- [Checkpoint 2 — Deterministic chunking](docs/testing/checkpoint-2.md)
+
+See the [manual verification index](docs/testing/README.md) for the learning workflow. Synthetic
+inputs live under `examples/`; disposable experiments belong under the Git-ignored `.data/` folder.
 
 ## Troubleshooting
 

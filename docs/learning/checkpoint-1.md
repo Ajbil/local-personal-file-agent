@@ -126,6 +126,9 @@ terminal history, screenshots, logs, CI output, and bug reports.
 
 ## Try it safely
 
+For the complete success, failure, privacy, and read-only exercises, follow the
+[Checkpoint 1 manual verification guide](../testing/checkpoint-1.md).
+
 Run the committed synthetic example:
 
 ```powershell
