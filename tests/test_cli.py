@@ -1,14 +1,25 @@
 """Tests for stable command-line behavior and exit codes."""
 
 import json
+from collections.abc import Sequence
 from pathlib import Path
 
+import numpy as np
 import pytest
 from typer.testing import CliRunner
 
 import local_file_agent.cli as cli
+from local_file_agent.chunking import Chunk
 from local_file_agent.config import Settings
 from local_file_agent.doctor import CheckResult, CheckStatus, DoctorReport
+from local_file_agent.embeddings import (
+    PROMPT_STRATEGY,
+    DocumentEmbeddingRun,
+    EmbeddedChunk,
+    EmbeddingBatchMetrics,
+    EmbeddingError,
+    QueryEmbedding,
+)
 
 runner = CliRunner()
 
@@ -30,6 +41,7 @@ def test_help_exposes_doctor_command() -> None:
     assert result.exit_code == 0
     assert "doctor" in result.stdout
     assert "inspect-chunks" in result.stdout
+    assert "inspect-embeddings" in result.stdout
     assert "scan" in result.stdout
 
 
@@ -347,3 +359,204 @@ def test_inspect_chunks_rejects_invalid_source_without_leaking_path(tmp_path: Pa
     assert result.exit_code == 1
     assert "Source folder rejected" in result.output
     assert str(missing) not in result.output
+
+
+class FakeEmbeddingService:
+    def __init__(self, _gateway: object, model: str) -> None:
+        self.model = model
+
+    def embed_documents(self, chunks: Sequence[Chunk], *, batch_size: int) -> DocumentEmbeddingRun:
+        embedded = tuple(
+            EmbeddedChunk(
+                chunk,
+                np.asarray([1.0, float(index)], dtype=np.float32),
+            )
+            for index, chunk in enumerate(chunks)
+        )
+        return DocumentEmbeddingRun(
+            requested_model=self.model,
+            returned_model=f"{self.model}:latest",
+            prompt_strategy=PROMPT_STRATEGY,
+            dimension=2,
+            embedded_chunks=embedded,
+            batch_size=batch_size,
+            batches=(EmbeddingBatchMetrics(0, len(chunks), 1.0, 0.5, 0.1, len(chunks)),),
+            wall_duration_ms=1.0,
+            total_duration_ms=0.5,
+        )
+
+    def embed_query(self, _query: str, *, expected_dimension: int | None) -> QueryEmbedding:
+        assert expected_dimension == 2
+        return QueryEmbedding(
+            requested_model=self.model,
+            returned_model=f"{self.model}:latest",
+            prompt_strategy=PROMPT_STRATEGY,
+            dimension=2,
+            vector=np.asarray([1.0, 0.0], dtype=np.float32),
+            wall_duration_ms=1.0,
+            total_duration_ms=0.5,
+            load_duration_ms=0.1,
+            prompt_eval_count=1,
+        )
+
+
+def _install_fake_embeddings(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(cli, "OllamaClient", DummyClient)
+    monkeypatch.setattr(cli, "EmbeddingService", FakeEmbeddingService)
+
+
+def test_inspect_embeddings_is_private_by_default(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    secret = "PRIVATE-EMBEDDING-CONTENT-" * 3
+    secret_query = "PRIVATE QUERY"
+    (tmp_path / "note.md").write_text(secret, encoding="utf-8")
+    _install_fake_embeddings(monkeypatch)
+
+    result = runner.invoke(
+        cli.app,
+        [
+            "inspect-embeddings",
+            "--source",
+            str(tmp_path),
+            "--document",
+            "note.md",
+            "--query",
+            secret_query,
+            "--chunk-size",
+            "30",
+            "--overlap",
+            "5",
+        ],
+    )
+
+    assert result.exit_code == 0
+    assert "dimension=2" in result.output
+    assert "Cosine-similarity ranking" in result.output
+    assert "score=" in result.output
+    assert secret not in result.output
+    assert secret_query not in result.output
+    assert str(tmp_path) not in result.output
+    assert "No query or document content was printed" in result.output
+    assert "[1.0, 0.0]" not in result.output
+
+
+def test_inspect_embeddings_json_privacy_and_show_text_policy(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    content = "A synthetic explanation of retrieval augmented generation."
+    query = "What is retrieval?"
+    (tmp_path / "note.txt").write_text(content, encoding="utf-8")
+    _install_fake_embeddings(monkeypatch)
+    arguments = [
+        "inspect-embeddings",
+        "--source",
+        str(tmp_path),
+        "--document",
+        "note.txt",
+        "--query",
+        query,
+        "--json",
+    ]
+
+    private_result = runner.invoke(cli.app, arguments)
+    visible_result = runner.invoke(cli.app, [*arguments, "--show-text"])
+
+    assert private_result.exit_code == 0
+    private = json.loads(private_result.stdout)
+    assert private["content_included"] is False
+    assert "query_text" not in private
+    assert "text" not in private["results"][0]
+    assert '"vector":' not in private_result.stdout
+    assert query not in private_result.stdout
+    assert visible_result.exit_code == 0
+    visible = json.loads(visible_result.stdout)
+    assert visible["query_text"] == query
+    assert visible["results"][0]["text"] == content
+
+
+@pytest.mark.parametrize(
+    ("extra", "message"),
+    [
+        (["--batch-size", "0"], "batch size"),
+        (["--top-k", "0"], "Top-k"),
+        (["--query", "   "], "query must not be empty"),
+    ],
+)
+def test_inspect_embeddings_rejects_invalid_options_before_ollama(
+    tmp_path: Path,
+    extra: list[str],
+    message: str,
+) -> None:
+    (tmp_path / "note.md").write_text("content", encoding="utf-8")
+    arguments = [
+        "inspect-embeddings",
+        "--source",
+        str(tmp_path),
+        "--document",
+        "note.md",
+        "--query",
+        "question",
+    ]
+    if "--query" in extra:
+        arguments = arguments[:-2]
+
+    result = runner.invoke(cli.app, [*arguments, *extra])
+
+    assert result.exit_code == 2
+    assert message in result.output
+
+
+def test_inspect_embeddings_rejects_empty_document_without_model_call(
+    tmp_path: Path,
+) -> None:
+    (tmp_path / "empty.md").write_text("", encoding="utf-8")
+
+    result = runner.invoke(
+        cli.app,
+        [
+            "inspect-embeddings",
+            "--source",
+            str(tmp_path),
+            "--document",
+            "empty.md",
+            "--query",
+            "question",
+        ],
+    )
+
+    assert result.exit_code == 1
+    assert "did not produce any chunks" in result.output
+
+
+def test_inspect_embeddings_converts_domain_failure_to_safe_cli_error(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    private_content = "DO-NOT-LEAK-THIS-CONTENT"
+    (tmp_path / "note.md").write_text(private_content, encoding="utf-8")
+
+    class FailingService(FakeEmbeddingService):
+        def embed_documents(
+            self, chunks: Sequence[Chunk], *, batch_size: int
+        ) -> DocumentEmbeddingRun:
+            raise EmbeddingError("Embedding vector dimension does not match.")
+
+    monkeypatch.setattr(cli, "OllamaClient", DummyClient)
+    monkeypatch.setattr(cli, "EmbeddingService", FailingService)
+    result = runner.invoke(
+        cli.app,
+        [
+            "inspect-embeddings",
+            "--source",
+            str(tmp_path),
+            "--document",
+            "note.md",
+            "--query",
+            "question",
+        ],
+    )
+
+    assert result.exit_code == 1
+    assert "Embedding inspection failed" in result.output
+    assert "dimension does not match" in result.output
+    assert private_content not in result.output

@@ -19,8 +19,16 @@ from local_file_agent.chunking import (
 )
 from local_file_agent.config import Settings
 from local_file_agent.doctor import DoctorReport, run_doctor
+from local_file_agent.embeddings import (
+    DEFAULT_EMBEDDING_BATCH_SIZE,
+    DEFAULT_TOP_K,
+    EmbeddingError,
+    EmbeddingInspectionReport,
+    EmbeddingService,
+    build_embedding_inspection_report,
+)
 from local_file_agent.ingestion import ScanReport, SourceRootError, scan_source
-from local_file_agent.ollama import OllamaClient
+from local_file_agent.ollama import OllamaClient, OllamaError
 
 app = typer.Typer(
     name="file-agent",
@@ -120,6 +128,53 @@ def _render_chunk_report(report: ChunkInspectionReport) -> None:
 
     if not report.content_included:
         typer.echo("\nNo document content was printed. Use --show-text only for approved files.")
+
+
+def _render_embedding_report(report: EmbeddingInspectionReport) -> None:
+    typer.echo(f"Embedding inspection completed for: {report.relative_path}")
+    typer.echo(f"Document ID: {report.document_id[:12]}...")
+    typer.echo(f"Model: requested={report.requested_model}, returned={report.returned_model}")
+    typer.echo(
+        f"Vectors: dimension={report.dimension}, chunks={report.chunk_count}, "
+        f"batches={report.batch_count}, batch_size={report.batch_size}"
+    )
+    typer.echo(f"Prompt strategy: {report.prompt_strategy}")
+    typer.echo(
+        f"Document timing: wall_ms={report.document_wall_duration_ms}, "
+        f"model_total_ms={report.document_total_duration_ms}"
+    )
+    typer.echo(
+        f"Query: characters={report.query_characters}, "
+        f"vector_norm={report.query_vector_norm}, "
+        f"wall_ms={report.query_wall_duration_ms}"
+    )
+
+    typer.echo("\nBatch metrics:")
+    for batch in report.batches:
+        typer.echo(
+            f"- batch={batch.batch_index} inputs={batch.input_count} "
+            f"wall_ms={batch.wall_duration_ms} "
+            f"model_total_ms={batch.total_duration_ms}"
+        )
+
+    if report.content_included:
+        typer.echo("\nWARNING: Exact query and chunk text follow because --show-text was supplied.")
+        typer.echo(f"Query text: {report.query_text}")
+
+    typer.echo("\nCosine-similarity ranking (learning aid; not a persisted index):")
+    for result in report.results:
+        typer.echo(
+            f"\nRank {result.rank}: chunk={result.chunk_index} "
+            f"score={result.similarity} range=[{result.start_char}:{result.end_char}) "
+            f"norm={result.vector_norm} sha256={result.content_sha256[:12]}..."
+        )
+        if result.text is not None:
+            typer.echo(result.text)
+
+    if not report.content_included:
+        typer.echo(
+            "\nNo query or document content was printed. Use --show-text only for approved files."
+        )
 
 
 @app.command()
@@ -236,3 +291,110 @@ def inspect_chunks(
         typer.echo(report.model_dump_json(indent=2, exclude_none=True))
     else:
         _render_chunk_report(report)
+
+
+@app.command()
+def inspect_embeddings(
+    source: Annotated[
+        Path,
+        typer.Option("--source", help="Explicitly approved folder to scan recursively."),
+    ],
+    document: Annotated[
+        str,
+        typer.Option("--document", help="Relative document path returned by scan."),
+    ],
+    query: Annotated[
+        str,
+        typer.Option("--query", help="Question to embed and compare with document chunks."),
+    ],
+    chunk_size: Annotated[
+        int,
+        typer.Option("--chunk-size", help="Target number of characters per chunk."),
+    ] = DEFAULT_CHUNK_SIZE,
+    overlap: Annotated[
+        int,
+        typer.Option(help="Characters repeated from the preceding chunk."),
+    ] = DEFAULT_OVERLAP,
+    batch_size: Annotated[
+        int,
+        typer.Option("--batch-size", help="Document prompts sent per Ollama request."),
+    ] = DEFAULT_EMBEDDING_BATCH_SIZE,
+    top_k: Annotated[
+        int,
+        typer.Option("--top-k", help="Highest-scoring chunks to show."),
+    ] = DEFAULT_TOP_K,
+    show_text: Annotated[
+        bool,
+        typer.Option(help="Explicitly include exact query and chunk text in the output."),
+    ] = False,
+    json_output: Annotated[
+        bool,
+        typer.Option("--json", help="Emit a machine-readable inspection report."),
+    ] = False,
+) -> None:
+    """Embed one trusted document and inspect query-to-chunk similarity."""
+
+    try:
+        selector = _normalize_document_selector(document)
+        options = ChunkingOptions(chunk_size=chunk_size, overlap=overlap)
+        if batch_size < 1:
+            raise ValueError("Embedding batch size must be at least one.")
+        if top_k < 1:
+            raise ValueError("Top-k must be at least one.")
+        if not query.strip():
+            raise ValueError("Embedding query must not be empty.")
+        settings = Settings()
+    except ValidationError as exc:
+        typer.echo("Invalid FILE_AGENT configuration:", err=True)
+        for message in _safe_validation_messages(exc):
+            typer.echo(f"- {message}", err=True)
+        raise typer.Exit(code=2) from exc
+    except (ValueError, ChunkingError) as exc:
+        typer.echo(f"Invalid embedding inspection options: {exc}", err=True)
+        raise typer.Exit(code=2) from exc
+
+    try:
+        outcome = scan_source(source)
+    except SourceRootError as exc:
+        typer.echo(f"Source folder rejected: {exc}", err=True)
+        raise typer.Exit(code=1) from exc
+
+    selected = next(
+        (item for item in outcome.documents if item.relative_path == selector),
+        None,
+    )
+    if selected is None:
+        typer.echo("Selected document was not accepted or found.", err=True)
+        raise typer.Exit(code=1)
+
+    chunks = chunk_document(selected, options)
+    if not chunks:
+        typer.echo("Selected document did not produce any chunks.", err=True)
+        raise typer.Exit(code=1)
+
+    try:
+        with OllamaClient(settings) as client:
+            service = EmbeddingService(client, settings.embedding_model)
+            document_run = service.embed_documents(chunks, batch_size=batch_size)
+            query_embedding = service.embed_query(
+                query,
+                expected_dimension=document_run.dimension,
+            )
+        report = build_embedding_inspection_report(
+            selected.character_count,
+            document_run,
+            query,
+            query_embedding,
+            chunk_size=options.chunk_size,
+            overlap=options.overlap,
+            top_k=top_k,
+            include_text=show_text,
+        )
+    except (OllamaError, EmbeddingError) as exc:
+        typer.echo(f"Embedding inspection failed: {exc}", err=True)
+        raise typer.Exit(code=1) from exc
+
+    if json_output:
+        typer.echo(report.model_dump_json(indent=2, exclude_none=True))
+    else:
+        _render_embedding_report(report)
