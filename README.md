@@ -6,9 +6,9 @@ The project is developed checkpoint by checkpoint so document ingestion, chunkin
 
 ## Current Status
 
-**Checkpoint 2 - Deterministic Chunking:** complete. Trusted normalized documents can now be divided into stable, overlapping, exact-offset passages for future embeddings and citations.
+**Checkpoint 3 - Local Embeddings:** complete. Trusted chunks and questions can now be converted by local EmbeddingGemma into validated, in-memory Float32 vectors and compared with cosine similarity.
 
-**Next:** begin Checkpoint 3 - Local Embeddings.
+**Next:** begin Checkpoint 4 - SQLite Vector Index.
 
 Implemented:
 
@@ -23,8 +23,12 @@ Implemented:
 - Stable path-derived document identities.
 - Deterministic character chunking with natural-boundary preference and exact source offsets.
 - Privacy-aware `file-agent inspect-chunks` human and JSON reports.
+- Prompt-aware document and query embedding through the direct local Ollama API.
+- Ordered batching with model, vector-count, dimension, finite-value, and non-zero-norm validation.
+- NumPy Float32 vectors kept in memory and protected from accidental mutation.
+- Privacy-aware `file-agent inspect-embeddings` reports with timings, norms, and cosine rankings.
 
-Not implemented yet: embedding generation, indexing, retrieval, or answer generation.
+Not implemented yet: persistent indexing, reusable multi-document retrieval, or answer generation.
 
 ## Mental Model
 
@@ -52,6 +56,15 @@ Approved source folder
             |
             +-- trusted normalized Documents (internal)
             +-- privacy-safe metadata report (terminal / JSON)
+```
+
+Checkpoint 3 adds a model transformation while keeping the stages inspectable:
+
+```text
+Trusted Document -> deterministic Chunks -> document prompts -> EmbeddingGemma -> Float32 vectors
+User question -----------------------------> query prompt -----> EmbeddingGemma -> query vector
+                                                                            |
+                                                      in-memory cosine ranking
 ```
 
 ## Prerequisites
@@ -148,6 +161,24 @@ uv run file-agent inspect-chunks `
 The inspector prints offsets and hashes but no text by default. Add `--show-text` only for files
 whose contents you deliberately want in terminal output. Add `--json` for machine-readable output.
 
+## Inspect Local Embeddings
+
+Run the semantic comparison lab using committed synthetic content:
+
+```powershell
+uv run file-agent inspect-embeddings `
+  --source examples/checkpoint-3/source `
+  --document semantic-lab.md `
+  --query "How much funding can a worker use for career development?" `
+  --chunk-size 450 `
+  --overlap 0 `
+  --top-k 3
+```
+
+The command uses only EmbeddingGemma, keeps vectors in memory, and shows relative cosine rankings.
+It prints no query text, document text, or raw vector coordinates by default. Add `--show-text` only
+for deliberately approved content. Exact scores and timings are model/runtime dependent.
+
 ## Configuration
 
 Safe defaults are shown in [.env.example](.env.example). Supported variables:
@@ -181,6 +212,7 @@ interpretation, safe failure experiments, privacy checks, and automated validati
 - [Checkpoint 0 — Environment and runtime readiness](docs/testing/checkpoint-0.md)
 - [Checkpoint 1 — Secure file discovery and parsing](docs/testing/checkpoint-1.md)
 - [Checkpoint 2 — Deterministic chunking](docs/testing/checkpoint-2.md)
+- [Checkpoint 3 — Local embeddings](docs/testing/checkpoint-3.md)
 
 See the [manual verification index](docs/testing/README.md) for the learning workflow. Synthetic
 inputs live under `examples/`; disposable experiments belong under the Git-ignored `.data/` folder.
@@ -199,6 +231,7 @@ inputs live under `examples/`; disposable experiments belong under the Git-ignor
 - [Checkpoint 0 learning record](docs/learning/checkpoint-0.md)
 - [Checkpoint 1 learning record](docs/learning/checkpoint-1.md)
 - [Checkpoint 2 learning record](docs/learning/checkpoint-2.md)
+- [Checkpoint 3 learning record](docs/learning/checkpoint-3.md)
 - [Architecture decision: direct local Ollama boundary](docs/decisions/0001-direct-local-ollama-boundary.md)
 - [Original Notion guide](Local%20Personal%20File%20Agent%20060c2786553b82208d268122f958b13d.md)
 - [Persistent collaboration guidance](AGENTS.md)

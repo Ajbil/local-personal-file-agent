@@ -10,6 +10,7 @@ from local_file_agent.ollama import (
     OllamaClient,
     OllamaConnectionError,
     OllamaResponseError,
+    model_names_equivalent,
 )
 
 
@@ -25,6 +26,7 @@ def test_client_validates_successful_api_responses() -> None:
         if request.url.path == "/api/embed":
             body = json.loads(request.content)
             assert body["truncate"] is False
+            assert body["input"] == ["Local retrieval systems map meaning into vectors."]
             return httpx.Response(
                 200,
                 json={
@@ -165,3 +167,69 @@ def test_timeout_becomes_safe_connection_error() -> None:
         pytest.raises(OllamaConnectionError, match="Timed out while contacting local Ollama"),
     ):
         client.version()
+
+
+def test_embed_preserves_batch_order_and_transport_metrics() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        body = json.loads(request.content)
+        assert body == {
+            "model": "embeddinggemma",
+            "input": ["first", "second"],
+            "truncate": False,
+        }
+        return httpx.Response(
+            200,
+            json={
+                "model": "embeddinggemma:latest",
+                "embeddings": [[1.0, 0.0], [0.0, 1.0]],
+                "total_duration": 3_000_000,
+                "load_duration": 1_000_000,
+                "prompt_eval_count": 2,
+            },
+        )
+
+    with OllamaClient(Settings(), transport=httpx.MockTransport(handler)) as client:
+        response = client.embed("embeddinggemma", ["first", "second"])
+
+    assert response.model == "embeddinggemma:latest"
+    assert response.vectors == [[1.0, 0.0], [0.0, 1.0]]
+    assert response.total_duration_ms == 3.0
+    assert response.load_duration_ms == 1.0
+    assert response.prompt_eval_count == 2
+
+
+def test_embed_rejects_empty_input_before_transport() -> None:
+    with OllamaClient(Settings()) as client, pytest.raises(ValueError, match="At least one"):
+        client.embed("embeddinggemma", [])
+
+
+@pytest.mark.parametrize(
+    ("returned_model", "vectors", "message"),
+    [
+        ("different-model", [[1.0]], "unexpected embedding model"),
+        ("embeddinggemma", [[1.0]], "unexpected embedding count"),
+    ],
+)
+def test_embed_rejects_response_identity_or_count_mismatch(
+    returned_model: str,
+    vectors: list[list[float]],
+    message: str,
+) -> None:
+    def handler(_request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            json={"model": returned_model, "embeddings": vectors},
+        )
+
+    with (
+        OllamaClient(Settings(), transport=httpx.MockTransport(handler)) as client,
+        pytest.raises(OllamaResponseError, match=message),
+    ):
+        client.embed("embeddinggemma", ["first", "second"])
+
+
+def test_model_name_equivalence_only_allows_implicit_latest_tag() -> None:
+    assert model_names_equivalent("embeddinggemma", "embeddinggemma")
+    assert model_names_equivalent("embeddinggemma", "embeddinggemma:latest")
+    assert not model_names_equivalent("embeddinggemma:latest", "embeddinggemma")
+    assert not model_names_equivalent("embeddinggemma", "other:latest")

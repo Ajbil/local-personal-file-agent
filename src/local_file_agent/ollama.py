@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import math
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from typing import Literal, Protocol, cast
 
 import httpx
@@ -30,6 +30,16 @@ class EmbeddingProbe(BaseModel):
     dimension: int
     total_duration_ms: float | None = None
     load_duration_ms: float | None = None
+
+
+class EmbeddingBatch(BaseModel):
+    """Validated transport result for one ordered embedding request."""
+
+    model: str
+    vectors: list[list[float]]
+    total_duration_ms: float | None = None
+    load_duration_ms: float | None = None
+    prompt_eval_count: int | None = None
 
 
 class GenerationProbe(BaseModel):
@@ -85,6 +95,7 @@ class _EmbeddingResponse(BaseModel):
     embeddings: list[list[float]]
     total_duration: int | None = None
     load_duration: int | None = None
+    prompt_eval_count: int | None = None
 
 
 class _Message(BaseModel):
@@ -133,6 +144,12 @@ def _nanoseconds_to_milliseconds(value: int | None) -> float | None:
     return None if value is None else round(value / 1_000_000, 3)
 
 
+def model_names_equivalent(requested: str, returned: str) -> bool:
+    """Treat an implicit Ollama ``:latest`` tag as the same model name."""
+
+    return requested == returned or (":" not in requested and returned == f"{requested}:latest")
+
+
 class OllamaClient:
     """Synchronous Ollama client restricted by validated application settings."""
 
@@ -177,22 +194,13 @@ class OllamaClient:
         return {model.name for model in response.models}
 
     def embedding_probe(self, model: str) -> EmbeddingProbe:
-        payload = self._request_json(
-            "POST",
-            "/api/embed",
-            json_body={
-                "model": model,
-                "input": "Local retrieval systems map meaning into vectors.",
-                "truncate": False,
-            },
+        response = self.embed(
+            model,
+            ["Local retrieval systems map meaning into vectors."],
+            truncate=False,
         )
-        response = _validate_response(_EmbeddingResponse, payload)
-        if response.model != model:
-            raise OllamaResponseError("Ollama returned an unexpected embedding model")
-        if len(response.embeddings) != 1:
-            raise OllamaResponseError("Ollama did not return exactly one embedding")
 
-        vector = response.embeddings[0]
+        vector = response.vectors[0]
         if not vector:
             raise OllamaResponseError("Ollama returned an empty embedding")
         if any(not math.isfinite(value) for value in vector):
@@ -200,8 +208,44 @@ class OllamaClient:
 
         return EmbeddingProbe(
             dimension=len(vector),
+            total_duration_ms=response.total_duration_ms,
+            load_duration_ms=response.load_duration_ms,
+        )
+
+    def embed(
+        self,
+        model: str,
+        inputs: Sequence[str],
+        *,
+        truncate: bool = False,
+    ) -> EmbeddingBatch:
+        """Generate an ordered embedding batch through Ollama's local API."""
+
+        ordered_inputs = list(inputs)
+        if not ordered_inputs:
+            raise ValueError("At least one embedding input is required.")
+
+        payload = self._request_json(
+            "POST",
+            "/api/embed",
+            json_body={
+                "model": model,
+                "input": ordered_inputs,
+                "truncate": truncate,
+            },
+        )
+        response = _validate_response(_EmbeddingResponse, payload)
+        if not model_names_equivalent(model, response.model):
+            raise OllamaResponseError("Ollama returned an unexpected embedding model")
+        if len(response.embeddings) != len(ordered_inputs):
+            raise OllamaResponseError("Ollama returned an unexpected embedding count")
+
+        return EmbeddingBatch(
+            model=response.model,
+            vectors=response.embeddings,
             total_duration_ms=_nanoseconds_to_milliseconds(response.total_duration),
             load_duration_ms=_nanoseconds_to_milliseconds(response.load_duration),
+            prompt_eval_count=response.prompt_eval_count,
         )
 
     def generation_probe(self, model: str) -> GenerationProbe:

@@ -2,9 +2,9 @@
 
 ## Project Status
 
-- Current milestone: Checkpoint 2 — Deterministic Chunking (complete)
-- Next milestone: Checkpoint 3 — Local Embeddings
-- Implementation status: Checkpoint 2 passed offset, overlap, determinism, privacy, and regression validation
+- Current milestone: Checkpoint 3 — Local Embeddings (complete)
+- Next milestone: Checkpoint 4 — SQLite Vector Index
+- Implementation status: Checkpoint 3 passed prompt, batching, model, dimension, numeric, privacy, and regression validation
 
 ## Summary
 
@@ -30,6 +30,7 @@ The application will expose these commands:
 - `file-agent doctor`: validate Python, Ollama connectivity, model availability, embedding dimensions, and generation.
 - `file-agent scan --source <folder>`: securely discover and parse approved Markdown and text files without persisting or printing their contents.
 - `file-agent inspect-chunks --source <folder> --document <relative-path>`: inspect deterministic chunk offsets, overlap, and hashes for one trusted document.
+- `file-agent inspect-embeddings --source <folder> --document <relative-path> --query <question>`: generate in-memory local vectors and inspect query-to-chunk cosine similarity.
 - `file-agent index --source <folder> --db <database>`: safely discover, parse, chunk, embed, and index documents.
 - `file-agent search "<question>" --db <database>`: display ranked chunks, similarity scores, and trusted citations without using Qwen.
 - `file-agent ask "<question>" --db <database>`: retrieve evidence and generate a cited answer.
