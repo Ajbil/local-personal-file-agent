@@ -2,9 +2,9 @@
 
 ## Project Status
 
-- Current milestone: Checkpoint 3 — Local Embeddings (complete)
-- Next milestone: Checkpoint 4 — SQLite Vector Index
-- Implementation status: Checkpoint 3 passed prompt, batching, model, dimension, numeric, privacy, and regression validation
+- Current milestone: Checkpoint 4 — SQLite Vector Index (complete)
+- Next milestone: Checkpoint 5 — Vector Search
+- Implementation status: Checkpoint 4 passed schema, transaction, atomic replacement, provenance, corruption, privacy, and regression validation
 
 ## Summary
 
@@ -32,6 +32,7 @@ The application will expose these commands:
 - `file-agent inspect-chunks --source <folder> --document <relative-path>`: inspect deterministic chunk offsets, overlap, and hashes for one trusted document.
 - `file-agent inspect-embeddings --source <folder> --document <relative-path> --query <question>`: generate in-memory local vectors and inspect query-to-chunk cosine similarity.
 - `file-agent index --source <folder> --db <database>`: safely discover, parse, chunk, embed, and index documents.
+- `file-agent inspect-index --db <database>`: reopen an existing index read-only and validate its schema, provenance, records, and vectors without Ollama.
 - `file-agent search "<question>" --db <database>`: display ranked chunks, similarity scores, and trusted citations without using Qwen.
 - `file-agent ask "<question>" --db <database>`: retrieve evidence and generate a cited answer.
 - `file-agent evaluate --mode deterministic|live`: run the synthetic evaluation suite.

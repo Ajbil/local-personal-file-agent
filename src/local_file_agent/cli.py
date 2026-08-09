@@ -27,8 +27,18 @@ from local_file_agent.embeddings import (
     EmbeddingService,
     build_embedding_inspection_report,
 )
+from local_file_agent.indexing import (
+    IndexBuildError,
+    IndexBuildReport,
+    IndexInspectionReport,
+    build_index,
+)
+from local_file_agent.indexing import (
+    inspect_index as inspect_stored_index,
+)
 from local_file_agent.ingestion import ScanReport, SourceRootError, scan_source
 from local_file_agent.ollama import OllamaClient, OllamaError
+from local_file_agent.storage import IndexStorageError
 
 app = typer.Typer(
     name="file-agent",
@@ -175,6 +185,52 @@ def _render_embedding_report(report: EmbeddingInspectionReport) -> None:
         typer.echo(
             "\nNo query or document content was printed. Use --show-text only for approved files."
         )
+
+
+def _render_index_build_report(report: IndexBuildReport) -> None:
+    typer.echo("SQLite vector index created and validated.")
+    typer.echo(f"Schema: version={report.schema_version}, vector_format={report.vector_format}")
+    typer.echo(
+        f"Model: requested={report.requested_embedding_model}, "
+        f"stored={report.embedding_model}, dimension={report.embedding_dimension}"
+    )
+    typer.echo(f"Prompt strategy: {report.prompt_strategy}")
+    typer.echo(
+        f"Chunking: chunk_size={report.chunk_size}, overlap={report.overlap}, "
+        f"batch_size={report.batch_size}, batches={report.batch_count}"
+    )
+    typer.echo(
+        f"Rows: documents={report.accepted_documents}, chunks={report.chunk_count}, "
+        f"embeddings={report.embedding_count}, skipped_entries={report.skipped_entries}"
+    )
+    typer.echo(f"Corpus fingerprint: {report.corpus_fingerprint}")
+    typer.echo(f"Replaced existing index: {report.replaced_existing}")
+    typer.echo(
+        f"Embedding timing: wall_ms={report.embedding_wall_duration_ms}, "
+        f"model_total_ms={report.embedding_total_duration_ms}"
+    )
+    typer.echo("No document text or vector coordinates were printed.")
+
+
+def _render_index_inspection_report(report: IndexInspectionReport) -> None:
+    typer.echo("SQLite vector index is valid and was opened read-only.")
+    typer.echo(f"Schema: version={report.schema_version}, vector_format={report.vector_format}")
+    typer.echo(
+        f"Model: requested={report.requested_embedding_model}, "
+        f"stored={report.embedding_model}, dimension={report.embedding_dimension}"
+    )
+    typer.echo(f"Prompt strategy: {report.prompt_strategy}")
+    typer.echo(f"Chunking: chunk_size={report.chunk_size}, overlap={report.overlap}")
+    typer.echo(
+        f"Rows: documents={report.document_count}, chunks={report.chunk_count}, "
+        f"embeddings={report.embedding_count}"
+    )
+    typer.echo(f"Corpus fingerprint: {report.corpus_fingerprint}")
+    typer.echo(
+        f"Integrity: sqlite={report.integrity_check}, "
+        f"foreign_keys_valid={report.foreign_keys_valid}"
+    )
+    typer.echo("No document text or vector coordinates were printed.")
 
 
 @app.command()
@@ -398,3 +454,96 @@ def inspect_embeddings(
         typer.echo(report.model_dump_json(indent=2, exclude_none=True))
     else:
         _render_embedding_report(report)
+
+
+@app.command("index")
+def index_documents(
+    source: Annotated[
+        Path,
+        typer.Option("--source", help="Explicitly approved folder to index recursively."),
+    ],
+    database: Annotated[
+        Path,
+        typer.Option("--db", help="SQLite index path outside the approved source folder."),
+    ],
+    chunk_size: Annotated[
+        int,
+        typer.Option("--chunk-size", help="Target number of characters per chunk."),
+    ] = DEFAULT_CHUNK_SIZE,
+    overlap: Annotated[
+        int,
+        typer.Option(help="Characters repeated from the preceding chunk."),
+    ] = DEFAULT_OVERLAP,
+    batch_size: Annotated[
+        int,
+        typer.Option("--batch-size", help="Document prompts sent per Ollama request."),
+    ] = DEFAULT_EMBEDDING_BATCH_SIZE,
+    force: Annotated[
+        bool,
+        typer.Option(help="Replace an existing valid app-owned index."),
+    ] = False,
+    json_output: Annotated[
+        bool,
+        typer.Option("--json", help="Emit a machine-readable metadata-only report."),
+    ] = False,
+) -> None:
+    """Build and atomically publish a validated local SQLite vector index."""
+
+    try:
+        settings = Settings()
+        chunking = ChunkingOptions(chunk_size=chunk_size, overlap=overlap)
+        if batch_size < 1:
+            raise ValueError("Embedding batch size must be at least one.")
+    except ValidationError as exc:
+        typer.echo("Invalid FILE_AGENT configuration:", err=True)
+        for message in _safe_validation_messages(exc):
+            typer.echo(f"- {message}", err=True)
+        raise typer.Exit(code=2) from exc
+    except (ValueError, ChunkingError) as exc:
+        typer.echo(f"Invalid index options: {exc}", err=True)
+        raise typer.Exit(code=2) from exc
+
+    try:
+        with OllamaClient(settings) as client:
+            report = build_index(
+                source,
+                database,
+                client,
+                settings.embedding_model,
+                chunking=chunking,
+                batch_size=batch_size,
+                force=force,
+            )
+    except (SourceRootError, OllamaError, EmbeddingError, IndexBuildError) as exc:
+        typer.echo(f"Index build failed: {exc}", err=True)
+        raise typer.Exit(code=1) from exc
+
+    if json_output:
+        typer.echo(report.model_dump_json(indent=2, exclude_none=True))
+    else:
+        _render_index_build_report(report)
+
+
+@app.command()
+def inspect_index(
+    database: Annotated[
+        Path,
+        typer.Option("--db", help="Existing Local Personal File Agent SQLite index."),
+    ],
+    json_output: Annotated[
+        bool,
+        typer.Option("--json", help="Emit a machine-readable metadata-only report."),
+    ] = False,
+) -> None:
+    """Open an existing index read-only and validate all stored records."""
+
+    try:
+        report = inspect_stored_index(database)
+    except IndexStorageError as exc:
+        typer.echo(f"Index inspection failed: {exc}", err=True)
+        raise typer.Exit(code=1) from exc
+
+    if json_output:
+        typer.echo(report.model_dump_json(indent=2))
+    else:
+        _render_index_inspection_report(report)

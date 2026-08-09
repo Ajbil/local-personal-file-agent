@@ -20,6 +20,7 @@ from local_file_agent.embeddings import (
     EmbeddingError,
     QueryEmbedding,
 )
+from local_file_agent.ollama import EmbeddingBatch
 
 runner = CliRunner()
 
@@ -42,6 +43,8 @@ def test_help_exposes_doctor_command() -> None:
     assert "doctor" in result.stdout
     assert "inspect-chunks" in result.stdout
     assert "inspect-embeddings" in result.stdout
+    assert "inspect-index" in result.stdout
+    assert "index" in result.stdout
     assert "scan" in result.stdout
 
 
@@ -560,3 +563,160 @@ def test_inspect_embeddings_converts_domain_failure_to_safe_cli_error(
     assert "Embedding inspection failed" in result.output
     assert "dimension does not match" in result.output
     assert private_content not in result.output
+
+
+class IndexClient(DummyClient):
+    def embed(
+        self,
+        _model: str,
+        inputs: Sequence[str],
+        *,
+        truncate: bool = False,
+    ) -> EmbeddingBatch:
+        assert truncate is False
+        return EmbeddingBatch(
+            model="embeddinggemma",
+            vectors=[[1.0, float(index + 1)] for index, _ in enumerate(inputs)],
+        )
+
+
+def test_index_and_inspect_index_outputs_are_private(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    source = tmp_path / "private-source-name"
+    source.mkdir()
+    secret = "PRIVATE-PERSISTED-CONTENT-" * 15
+    (source / "note.md").write_text(secret, encoding="utf-8")
+    database = tmp_path / "learning.sqlite"
+    monkeypatch.setattr(cli, "OllamaClient", IndexClient)
+
+    build_result = runner.invoke(
+        cli.app,
+        [
+            "index",
+            "--source",
+            str(source),
+            "--db",
+            str(database),
+            "--chunk-size",
+            "100",
+            "--overlap",
+            "20",
+            "--batch-size",
+            "2",
+        ],
+    )
+    inspect_result = runner.invoke(
+        cli.app,
+        ["inspect-index", "--db", str(database)],
+    )
+
+    assert build_result.exit_code == 0
+    assert "SQLite vector index created and validated" in build_result.output
+    assert "documents=1" in build_result.output
+    assert "dimension=2" in build_result.output
+    assert secret not in build_result.output
+    assert str(source) not in build_result.output
+    assert "[1.0," not in build_result.output
+    assert inspect_result.exit_code == 0
+    assert "opened read-only" in inspect_result.output
+    assert secret not in inspect_result.output
+    assert str(database) not in inspect_result.output
+
+
+def test_index_and_inspect_index_json_reports_are_metadata_only(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    source = tmp_path / "source"
+    source.mkdir()
+    secret = "SYNTHETIC SECRET TEXT " * 10
+    (source / "note.txt").write_text(secret, encoding="utf-8")
+    database = tmp_path / "index.sqlite"
+    monkeypatch.setattr(cli, "OllamaClient", IndexClient)
+
+    build_result = runner.invoke(
+        cli.app,
+        [
+            "index",
+            "--source",
+            str(source),
+            "--db",
+            str(database),
+            "--json",
+        ],
+    )
+    inspect_result = runner.invoke(
+        cli.app,
+        ["inspect-index", "--db", str(database), "--json"],
+    )
+
+    assert build_result.exit_code == 0
+    build_payload = json.loads(build_result.stdout)
+    assert build_payload["content_included"] is False
+    assert build_payload["chunk_count"] == build_payload["embedding_count"]
+    assert "text" not in build_result.stdout
+    assert "vector" not in build_payload
+    assert secret not in build_result.stdout
+    assert inspect_result.exit_code == 0
+    inspection = json.loads(inspect_result.stdout)
+    assert inspection["opened_read_only"] is True
+    assert inspection["integrity_check"] == "ok"
+    assert inspection["content_included"] is False
+
+
+def test_index_existing_target_requires_force_without_leaking_content(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    source = tmp_path / "source"
+    source.mkdir()
+    secret = "DO-NOT-PRINT-ME"
+    (source / "note.md").write_text(secret, encoding="utf-8")
+    database = tmp_path / "index.sqlite"
+    monkeypatch.setattr(cli, "OllamaClient", IndexClient)
+    arguments = ["index", "--source", str(source), "--db", str(database)]
+    assert runner.invoke(cli.app, arguments).exit_code == 0
+
+    result = runner.invoke(cli.app, arguments)
+
+    assert result.exit_code == 1
+    assert "--force" in result.output
+    assert secret not in result.output
+
+
+@pytest.mark.parametrize(
+    ("extra", "message"),
+    [
+        (["--batch-size", "0"], "batch size"),
+        (["--chunk-size", "10", "--overlap", "10"], "smaller than chunk size"),
+    ],
+)
+def test_index_rejects_invalid_options(tmp_path: Path, extra: list[str], message: str) -> None:
+    source = tmp_path / "source"
+    source.mkdir()
+
+    result = runner.invoke(
+        cli.app,
+        [
+            "index",
+            "--source",
+            str(source),
+            "--db",
+            str(tmp_path / "index.sqlite"),
+            *extra,
+        ],
+    )
+
+    assert result.exit_code == 2
+    assert "Invalid index options" in result.output
+    assert message in result.output
+
+
+def test_inspect_index_rejects_unrelated_database(tmp_path: Path) -> None:
+    database = tmp_path / "unrelated.sqlite"
+    database.write_bytes(b"not sqlite")
+
+    result = runner.invoke(cli.app, ["inspect-index", "--db", str(database)])
+
+    assert result.exit_code == 1
+    assert "Index inspection failed" in result.output
+    assert str(database) not in result.output
