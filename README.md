@@ -6,9 +6,9 @@ The project is developed checkpoint by checkpoint so document ingestion, chunkin
 
 ## Current Status
 
-**Checkpoint 3 - Local Embeddings:** complete. Trusted chunks and questions can now be converted by local EmbeddingGemma into validated, in-memory Float32 vectors and compared with cosine similarity.
+**Checkpoint 4 - SQLite Vector Index:** complete. Approved documents, exact chunks, provenance, and validated Float32 embeddings can now be transactionally persisted, atomically published, and reopened read-only.
 
-**Next:** begin Checkpoint 4 - SQLite Vector Index.
+**Next:** begin Checkpoint 5 - Vector Search.
 
 Implemented:
 
@@ -27,8 +27,12 @@ Implemented:
 - Ordered batching with model, vector-count, dimension, finite-value, and non-zero-norm validation.
 - NumPy Float32 vectors kept in memory and protected from accidental mutation.
 - Privacy-aware `file-agent inspect-embeddings` reports with timings, norms, and cosine rankings.
+- Versioned SQLite schema for metadata, documents, chunks, and portable Float32 embedding blobs.
+- Transactional temporary builds with read-only validation before atomic replacement.
+- App-ownership, schema, foreign-key, hash, count, dimension, and vector corruption checks.
+- Metadata-only `file-agent index` and read-only `file-agent inspect-index` reports.
 
-Not implemented yet: persistent indexing, reusable multi-document retrieval, or answer generation.
+Not implemented yet: reusable vector search, overlap suppression, citations, or answer generation.
 
 ## Mental Model
 
@@ -65,6 +69,18 @@ Trusted Document -> deterministic Chunks -> document prompts -> EmbeddingGemma -
 User question -----------------------------> query prompt -----> EmbeddingGemma -> query vector
                                                                             |
                                                       in-memory cosine ranking
+```
+
+Checkpoint 4 adds a durable trust boundary:
+
+```text
+Documents -> Chunks -> Embeddings -> temporary SQLite transaction
+                                      |
+                              read-only validation
+                                      |
+                               atomic publication
+                                      v
+                         durable versioned local index
 ```
 
 ## Prerequisites
@@ -179,6 +195,29 @@ The command uses only EmbeddingGemma, keeps vectors in memory, and shows relativ
 It prints no query text, document text, or raw vector coordinates by default. Add `--show-text` only
 for deliberately approved content. Exact scores and timings are model/runtime dependent.
 
+## Build and Inspect a SQLite Vector Index
+
+Create a disposable Git-ignored destination and index the committed synthetic corpus:
+
+```powershell
+New-Item -ItemType Directory -Force .data/manual-testing/checkpoint-4
+
+uv run file-agent index `
+  --source examples/checkpoint-4/source `
+  --db .data/manual-testing/checkpoint-4/index.sqlite
+```
+
+Reopen and validate it without calling Ollama:
+
+```powershell
+uv run file-agent inspect-index `
+  --db .data/manual-testing/checkpoint-4/index.sqlite
+```
+
+An existing valid index is not replaced unless `--force` is supplied. Even with `--force`, an
+unrelated or unrecognizable file is never overwritten. Indexes contain chunk text and embeddings;
+keep them under `.data/` or another private Git-ignored location.
+
 ## Configuration
 
 Safe defaults are shown in [.env.example](.env.example). Supported variables:
@@ -213,6 +252,7 @@ interpretation, safe failure experiments, privacy checks, and automated validati
 - [Checkpoint 1 — Secure file discovery and parsing](docs/testing/checkpoint-1.md)
 - [Checkpoint 2 — Deterministic chunking](docs/testing/checkpoint-2.md)
 - [Checkpoint 3 — Local embeddings](docs/testing/checkpoint-3.md)
+- [Checkpoint 4 — SQLite vector index](docs/testing/checkpoint-4.md)
 
 See the [manual verification index](docs/testing/README.md) for the learning workflow. Synthetic
 inputs live under `examples/`; disposable experiments belong under the Git-ignored `.data/` folder.
@@ -232,6 +272,7 @@ inputs live under `examples/`; disposable experiments belong under the Git-ignor
 - [Checkpoint 1 learning record](docs/learning/checkpoint-1.md)
 - [Checkpoint 2 learning record](docs/learning/checkpoint-2.md)
 - [Checkpoint 3 learning record](docs/learning/checkpoint-3.md)
+- [Checkpoint 4 learning record](docs/learning/checkpoint-4.md)
 - [Architecture decision: direct local Ollama boundary](docs/decisions/0001-direct-local-ollama-boundary.md)
 - [Original Notion guide](Local%20Personal%20File%20Agent%20060c2786553b82208d268122f958b13d.md)
 - [Persistent collaboration guidance](AGENTS.md)

@@ -28,5 +28,6 @@ For each checkpoint:
 - [Checkpoint 1 — Secure file discovery and parsing](checkpoint-1.md)
 - [Checkpoint 2 — Deterministic chunking](checkpoint-2.md)
 - [Checkpoint 3 — Local embeddings](checkpoint-3.md)
+- [Checkpoint 4 — SQLite vector index](checkpoint-4.md)
 
 Commands target Windows PowerShell because Windows is the project's baseline platform.
