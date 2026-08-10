@@ -348,6 +348,7 @@ inputs live under `examples/`; disposable experiments belong under the Git-ignor
 - [Checkpoint 3 learning record](docs/learning/checkpoint-3.md)
 - [Checkpoint 4 learning record](docs/learning/checkpoint-4.md)
 - [Checkpoint 5 learning record](docs/learning/checkpoint-5.md)
+- [Checkpoint 6 learning record](docs/learning/checkpoint-6.md)
 - [Architecture decision: direct local Ollama boundary](docs/decisions/0001-direct-local-ollama-boundary.md)
 - [Original Notion guide](Local%20Personal%20File%20Agent%20060c2786553b82208d268122f958b13d.md)
 - [Persistent collaboration guidance](AGENTS.md)
