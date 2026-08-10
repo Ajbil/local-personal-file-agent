@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import math
 from collections.abc import Mapping, Sequence
+from dataclasses import dataclass
 from typing import Literal, Protocol, cast
 
 import httpx
@@ -40,6 +41,25 @@ class EmbeddingBatch(BaseModel):
     total_duration_ms: float | None = None
     load_duration_ms: float | None = None
     prompt_eval_count: int | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class ChatMessage:
+    """One role-delimited message sent to the local answer model."""
+
+    role: Literal["system", "user"]
+    content: str
+
+
+class StructuredChatResult(BaseModel):
+    """Validated transport result whose content still needs domain validation."""
+
+    model: str
+    content: str
+    total_duration_ms: float | None = None
+    load_duration_ms: float | None = None
+    prompt_eval_count: int | None = None
+    eval_count: int | None = None
 
 
 class GenerationProbe(BaseModel):
@@ -112,6 +132,8 @@ class _ChatResponse(BaseModel):
     message: _Message
     total_duration: int | None = None
     load_duration: int | None = None
+    prompt_eval_count: int | None = None
+    eval_count: int | None = None
 
 
 class _SmokePayload(BaseModel):
@@ -250,33 +272,70 @@ class OllamaClient:
 
     def generation_probe(self, model: str) -> GenerationProbe:
         schema = _SmokePayload.model_json_schema()
+        response = self.chat_structured(
+            model,
+            [
+                ChatMessage(
+                    role="user",
+                    content='Return JSON with exactly one field: {"status": "ok"}.',
+                )
+            ],
+            schema,
+        )
+        try:
+            _SmokePayload.model_validate_json(response.content)
+        except ValidationError as exc:
+            raise OllamaResponseError("Ollama returned invalid structured output") from exc
+
+        return GenerationProbe(
+            total_duration_ms=response.total_duration_ms,
+            load_duration_ms=response.load_duration_ms,
+        )
+
+    def chat_structured(
+        self,
+        model: str,
+        messages: Sequence[ChatMessage],
+        schema: Mapping[str, object],
+    ) -> StructuredChatResult:
+        """Generate one non-streaming, non-thinking response constrained by JSON Schema."""
+
+        ordered_messages = list(messages)
+        if not ordered_messages:
+            raise ValueError("At least one chat message is required.")
+        if any(not message.content.strip() for message in ordered_messages):
+            raise ValueError("Chat messages must not be empty.")
+        if not schema:
+            raise ValueError("A structured-output schema is required.")
+
         payload = self._request_json(
             "POST",
             "/api/chat",
             json_body={
                 "model": model,
                 "messages": [
-                    {
-                        "role": "user",
-                        "content": 'Return JSON with exactly one field: {"status": "ok"}.',
-                    }
+                    {"role": message.role, "content": message.content}
+                    for message in ordered_messages
                 ],
                 "stream": False,
+                "think": False,
                 "format": schema,
                 "options": {"temperature": 0},
             },
         )
         response = _validate_response(_ChatResponse, payload)
-        if response.model != model:
+        if not model_names_equivalent(model, response.model):
             raise OllamaResponseError("Ollama returned an unexpected answer model")
-        try:
-            _SmokePayload.model_validate_json(response.message.content)
-        except ValidationError as exc:
-            raise OllamaResponseError("Ollama returned invalid structured output") from exc
+        if response.message.role != "assistant" or not response.message.content.strip():
+            raise OllamaResponseError("Ollama returned an invalid answer message")
 
-        return GenerationProbe(
+        return StructuredChatResult(
+            model=response.model,
+            content=response.message.content,
             total_duration_ms=_nanoseconds_to_milliseconds(response.total_duration),
             load_duration_ms=_nanoseconds_to_milliseconds(response.load_duration),
+            prompt_eval_count=response.prompt_eval_count,
+            eval_count=response.eval_count,
         )
 
     def runtime_probe(self) -> RuntimeProbe:

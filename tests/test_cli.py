@@ -1,7 +1,7 @@
 """Tests for stable command-line behavior and exit codes."""
 
 import json
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from pathlib import Path
 from typing import ClassVar
 
@@ -21,7 +21,7 @@ from local_file_agent.embeddings import (
     EmbeddingError,
     QueryEmbedding,
 )
-from local_file_agent.ollama import EmbeddingBatch
+from local_file_agent.ollama import ChatMessage, EmbeddingBatch, StructuredChatResult
 
 runner = CliRunner()
 
@@ -48,6 +48,7 @@ def test_help_exposes_doctor_command() -> None:
     assert "index" in result.stdout
     assert "scan" in result.stdout
     assert "search" in result.stdout
+    assert "ask" in result.stdout
 
 
 def test_invalid_remote_configuration_returns_exit_code_two(
@@ -859,4 +860,161 @@ def test_search_rejects_invalid_options(tmp_path: Path, arguments: list[str], me
 
     assert result.exit_code == 2
     assert "Invalid search options" in result.output
+    assert message in result.output
+
+
+class AnswerClient(SearchClient):
+    chat_calls: ClassVar[list[list[ChatMessage]]] = []
+
+    def chat_structured(
+        self,
+        model: str,
+        messages: Sequence[ChatMessage],
+        schema: Mapping[str, object],
+    ) -> StructuredChatResult:
+        assert model == "qwen3.5:4b"
+        assert schema["type"] == "object"
+        self.chat_calls.append(list(messages))
+        return StructuredChatResult(
+            model=model,
+            content=json.dumps(
+                {
+                    "answer": "The synthetic target is ten minutes.",
+                    "citation_ids": [1],
+                    "insufficient_evidence": False,
+                }
+            ),
+            total_duration_ms=5.0,
+        )
+
+
+class NoMatchAnswerClient(NoMatchSearchClient):
+    def chat_structured(
+        self,
+        _model: str,
+        _messages: Sequence[ChatMessage],
+        _schema: Mapping[str, object],
+    ) -> StructuredChatResult:
+        raise AssertionError("Qwen must not be called when retrieval has no results")
+
+
+class MalformedAnswerClient(SearchClient):
+    calls: ClassVar[int] = 0
+
+    def chat_structured(
+        self,
+        model: str,
+        _messages: Sequence[ChatMessage],
+        _schema: Mapping[str, object],
+    ) -> StructuredChatResult:
+        type(self).calls += 1
+        return StructuredChatResult(model=model, content="SENSITIVE MALFORMED OUTPUT")
+
+
+def test_ask_generates_trusted_answer_without_printing_context(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    context = "Critical alerts have a synthetic ten-minute response target."
+    database = _build_search_test_index(tmp_path, monkeypatch, context)
+    before = (database.read_bytes(), database.stat().st_mtime_ns)
+    AnswerClient.chat_calls.clear()
+    monkeypatch.setattr(cli, "OllamaClient", AnswerClient)
+
+    result = runner.invoke(cli.app, ["ask", "What is the response target?", "--db", str(database)])
+
+    assert result.exit_code == 0
+    assert "Grounded answer generated" in result.output
+    assert "The synthetic target is ten minutes" in result.output
+    assert "note.md#chunk-0" in result.output
+    assert context not in result.output
+    assert str(database) not in result.output
+    assert "Retrieved context was not printed" in result.output
+    assert len(AnswerClient.chat_calls) == 1
+    assert context in AnswerClient.chat_calls[0][1].content
+    assert "note.md" not in AnswerClient.chat_calls[0][1].content
+    assert (database.read_bytes(), database.stat().st_mtime_ns) == before
+
+
+def test_ask_show_context_is_explicit(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    context = "Synthetic context safe to reveal."
+    database = _build_search_test_index(tmp_path, monkeypatch, context)
+    monkeypatch.setattr(cli, "OllamaClient", AnswerClient)
+
+    result = runner.invoke(
+        cli.app,
+        ["ask", "question", "--db", str(database), "--show-context"],
+    )
+
+    assert result.exit_code == 0
+    assert "WARNING: Exact context sent to Qwen follows" in result.output
+    assert context in result.output
+
+
+def test_ask_json_omits_context_by_default(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    context = "JSON PRIVATE CONTEXT"
+    database = _build_search_test_index(tmp_path, monkeypatch, context)
+    monkeypatch.setattr(cli, "OllamaClient", AnswerClient)
+
+    result = runner.invoke(
+        cli.app,
+        ["ask", "question", "--db", str(database), "--json"],
+    )
+
+    assert result.exit_code == 0
+    payload = json.loads(result.stdout)
+    assert payload["status"] == "answered"
+    assert payload["context_included"] is False
+    assert "context" not in payload
+    assert payload["citations"][0]["relative_path"] == "note.md"
+    assert context not in result.output
+
+
+def test_ask_zero_matches_is_successful_refusal_without_qwen(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    database = _build_search_test_index(tmp_path, monkeypatch, "unrelated")
+    monkeypatch.setattr(cli, "OllamaClient", NoMatchAnswerClient)
+
+    result = runner.invoke(
+        cli.app,
+        ["ask", "unsupported", "--db", str(database), "--min-score", "0.3"],
+    )
+
+    assert result.exit_code == 0
+    assert "Answer refused safely" in result.output
+    assert "Sources: none" in result.output
+    assert "generation_attempts=0" in result.output
+
+
+def test_ask_malformed_output_fails_without_leaking_raw_response(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    database = _build_search_test_index(tmp_path, monkeypatch, "relevant")
+    MalformedAnswerClient.calls = 0
+    monkeypatch.setattr(cli, "OllamaClient", MalformedAnswerClient)
+
+    result = runner.invoke(cli.app, ["ask", "question", "--db", str(database)])
+
+    assert result.exit_code == 1
+    assert "invalid structured output after one retry" in result.output
+    assert "SENSITIVE MALFORMED OUTPUT" not in result.output
+    assert MalformedAnswerClient.calls == 2
+
+
+@pytest.mark.parametrize(
+    ("arguments", "message"),
+    [
+        (["question", "--top-k", "0"], "Top-k"),
+        (["question", "--min-score", "1.1"], "Minimum score"),
+        (["   "], "must not be empty"),
+    ],
+)
+def test_ask_rejects_invalid_options(tmp_path: Path, arguments: list[str], message: str) -> None:
+    result = runner.invoke(
+        cli.app,
+        ["ask", *arguments, "--db", str(tmp_path / "index.sqlite")],
+    )
+
+    assert result.exit_code == 2
+    assert "Invalid answer options" in result.output
     assert message in result.output

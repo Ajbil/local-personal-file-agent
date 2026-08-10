@@ -60,6 +60,16 @@ class SearchRun:
     retrieval_wall_duration_ms: float
 
 
+@dataclass(frozen=True, slots=True)
+class DatabaseSearchRun:
+    """Validated index and retrieval result shared by search and answer flows."""
+
+    index: StoredIndex
+    question: str
+    search: SearchRun
+    index_load_duration_ms: float
+
+
 class SearchResultReport(BaseModel):
     rank: int = Field(gt=0)
     citation: str
@@ -167,7 +177,9 @@ def retrieve(
     )
 
 
-def _citation(chunk: Chunk) -> str:
+def citation_for_chunk(chunk: Chunk) -> str:
+    """Build a trusted, stable citation label from application-owned metadata."""
+
     return f"{chunk.relative_path}#chunk-{chunk.chunk_index}[{chunk.start_char}:{chunk.end_char})"
 
 
@@ -184,7 +196,7 @@ def build_search_report(
     results = [
         SearchResultReport(
             rank=rank,
-            citation=_citation(result.chunk),
+            citation=citation_for_chunk(result.chunk),
             relative_path=result.chunk.relative_path,
             chunk_index=result.chunk.chunk_index,
             start_char=result.chunk.start_char,
@@ -229,6 +241,25 @@ def search_database(
 ) -> SearchReport:
     """Validate an index first, then embed and retrieve using its exact model contract."""
 
+    database_run = run_database_search(database, query, gateway, options=options)
+    return build_search_report(
+        database_run.index,
+        database_run.question,
+        database_run.search,
+        index_load_duration_ms=database_run.index_load_duration_ms,
+        include_text=include_text,
+    )
+
+
+def run_database_search(
+    database: Path,
+    query: str,
+    gateway: EmbeddingGateway,
+    *,
+    options: SearchOptions | None = None,
+) -> DatabaseSearchRun:
+    """Return trusted internal retrieval state without converting it to display data."""
+
     normalized = query.strip()
     if not normalized:
         raise ValueError("Search question must not be empty.")
@@ -243,10 +274,9 @@ def search_database(
         expected_dimension=index.metadata.embedding_dimension,
     )
     run = retrieve(index, query_embedding, options)
-    return build_search_report(
-        index,
-        normalized,
-        run,
+    return DatabaseSearchRun(
+        index=index,
+        question=normalized,
+        search=run,
         index_load_duration_ms=index_load_duration_ms,
-        include_text=include_text,
     )
