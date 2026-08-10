@@ -6,9 +6,11 @@ The project is developed checkpoint by checkpoint so document ingestion, chunkin
 
 ## Current Status
 
-**Checkpoint 5 - Read-Only Vector Search:** complete. Questions can now be embedded with the index-recorded model and compared against every validated stored vector using deterministic cosine ranking, thresholding, and overlap suppression.
+**Checkpoint 6 - Grounded Answer Generation and Trusted Citations:** complete. Retrieved passages
+are now sent as bounded, numbered, untrusted evidence to local Qwen. Strict structured-output and
+application-owned provenance validation return either a cited answer or a fixed refusal.
 
-**Next:** begin Checkpoint 6 - Grounded Answer Generation and Citations.
+**Next:** begin Checkpoint 7 - Evaluation and Security Regression Suite.
 
 Implemented:
 
@@ -35,8 +37,14 @@ Implemented:
 - Brute-force NumPy cosine retrieval with stable tie-breakers and provisional score thresholds.
 - Fixed 80% same-document overlap suppression before top-K selection.
 - Privacy-aware `file-agent search` human and JSON reports with trusted source citations.
+- Structured local Qwen generation with temperature zero and thinking disabled.
+- Bounded, JSON-escaped, explicitly untrusted evidence construction.
+- Strict answer schema, one malformed-output retry, and fail-closed semantic validation.
+- Application-owned citation mapping and fixed unsupported-question refusal.
+- Privacy-aware `file-agent ask` human and JSON reports with opt-in context inspection.
 
-Not implemented yet: Qwen answer generation, grounded context construction, validated answer citations, or refusal behavior.
+Not implemented yet: automated retrieval/answer evaluation metrics, canary-based prompt-injection
+regression scoring, production packaging, or a web interface.
 
 ## Mental Model
 
@@ -96,6 +104,19 @@ read-only SQLite vectors ----------------> cosine scores
                                               |
                            threshold -> overlap suppression -> top-K citations
 ```
+
+Checkpoint 6 completes the first RAG loop while keeping provenance outside the model:
+
+```text
+Question -> Checkpoint 5 retrieval -> numbered untrusted passages -> local Qwen structured JSON
+                                                                         |
+                         fixed refusal <- semantic validation <- answer + temporary IDs
+                                                                         |
+                                   trusted SQLite metadata -> real source citations
+```
+
+Qwen acts as a writer, not a provenance authority. Prompt instructions guide the writer; strict
+schema and citation validation enforce the application boundary.
 
 ## Prerequisites
 
@@ -250,6 +271,25 @@ Search reports trusted relative paths, chunk numbers, offsets, and scores withou
 text. Add `--show-text` only for an approved index. Search never invokes Qwen and never modifies the
 SQLite database.
 
+## Generate a Grounded Answer
+
+Use the same read-only index to retrieve evidence and ask local Qwen for a cited answer:
+
+```powershell
+uv run file-agent ask `
+  "How quickly must a critical Copper Lantern alert be acknowledged?" `
+  --db .data/manual-testing/checkpoint-6/index.sqlite
+```
+
+Qwen receives only temporary evidence IDs and passage text. Python validates the structured answer
+and converts accepted IDs into trusted relative paths, chunk numbers, offsets, scores, and hashes.
+If evidence is absent or the model returns invalid citations, the application returns a fixed
+refusal with no sources.
+
+The default output hides retrieved context. Add `--show-context` only for an approved index. The
+answer itself is derived from document content and may still be sensitive. `ask`, like `search`,
+opens the SQLite index read-only.
+
 ## Configuration
 
 Safe defaults are shown in [.env.example](.env.example). Supported variables:
@@ -286,6 +326,7 @@ interpretation, safe failure experiments, privacy checks, and automated validati
 - [Checkpoint 3 — Local embeddings](docs/testing/checkpoint-3.md)
 - [Checkpoint 4 — SQLite vector index](docs/testing/checkpoint-4.md)
 - [Checkpoint 5 — Read-only vector search](docs/testing/checkpoint-5.md)
+- [Checkpoint 6 — Grounded answers and trusted citations](docs/testing/checkpoint-6.md)
 
 See the [manual verification index](docs/testing/README.md) for the learning workflow. Synthetic
 inputs live under `examples/`; disposable experiments belong under the Git-ignored `.data/` folder.

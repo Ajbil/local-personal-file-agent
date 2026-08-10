@@ -2,9 +2,10 @@
 
 ## Project Status
 
-- Current milestone: Checkpoint 5 — Vector Search (complete)
-- Next milestone: Checkpoint 6 — Grounded Answer Generation and Citations
-- Implementation status: Checkpoint 5 passed ranking, threshold, deterministic tie, overlap suppression, read-only, privacy, and regression validation
+- Current milestone: Checkpoint 6 — Grounded Answer Generation and Trusted Citations (complete)
+- Next milestone: Checkpoint 7 — Evaluation and Security Regression Suite
+- Implementation status: Checkpoint 6 passed structured-output, refusal, retry, provenance,
+  prompt-boundary, context-budget, read-only, privacy, and regression validation
 
 ## Summary
 

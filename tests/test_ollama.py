@@ -7,6 +7,7 @@ import pytest
 
 from local_file_agent.config import Settings
 from local_file_agent.ollama import (
+    ChatMessage,
     OllamaClient,
     OllamaConnectionError,
     OllamaResponseError,
@@ -39,6 +40,7 @@ def test_client_validates_successful_api_responses() -> None:
         if request.url.path == "/api/chat":
             body = json.loads(request.content)
             assert body["stream"] is False
+            assert body["think"] is False
             assert body["options"]["temperature"] == 0
             return httpx.Response(
                 200,
@@ -105,6 +107,99 @@ def test_generation_probe_rejects_invalid_structured_output() -> None:
         pytest.raises(OllamaResponseError, match="invalid structured output"),
     ):
         client.generation_probe("qwen3.5:4b")
+
+
+def test_structured_chat_preserves_roles_schema_and_metrics() -> None:
+    schema = {
+        "type": "object",
+        "properties": {"answer": {"type": "string"}},
+        "required": ["answer"],
+    }
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        body = json.loads(request.content)
+        assert body == {
+            "model": "qwen3.5:4b",
+            "messages": [
+                {"role": "system", "content": "Use evidence only."},
+                {"role": "user", "content": "Question and evidence"},
+            ],
+            "stream": False,
+            "think": False,
+            "format": schema,
+            "options": {"temperature": 0},
+        }
+        return httpx.Response(
+            200,
+            json={
+                "model": "qwen3.5:4b",
+                "message": {"role": "assistant", "content": '{"answer":"supported"}'},
+                "total_duration": 8_000_000,
+                "load_duration": 2_000_000,
+                "prompt_eval_count": 40,
+                "eval_count": 8,
+            },
+        )
+
+    with OllamaClient(Settings(), transport=httpx.MockTransport(handler)) as client:
+        result = client.chat_structured(
+            "qwen3.5:4b",
+            [
+                ChatMessage(role="system", content="Use evidence only."),
+                ChatMessage(role="user", content="Question and evidence"),
+            ],
+            schema,
+        )
+
+    assert result.model == "qwen3.5:4b"
+    assert result.content == '{"answer":"supported"}'
+    assert result.total_duration_ms == 8.0
+    assert result.load_duration_ms == 2.0
+    assert result.prompt_eval_count == 40
+    assert result.eval_count == 8
+
+
+@pytest.mark.parametrize(
+    ("messages", "schema", "message"),
+    [
+        ([], {"type": "object"}, "At least one"),
+        ([ChatMessage(role="user", content=" ")], {"type": "object"}, "must not be empty"),
+        ([ChatMessage(role="user", content="question")], {}, "schema is required"),
+    ],
+)
+def test_structured_chat_rejects_invalid_requests_before_transport(
+    messages: list[ChatMessage], schema: dict[str, object], message: str
+) -> None:
+    with OllamaClient(Settings()) as client, pytest.raises(ValueError, match=message):
+        client.chat_structured("qwen3.5:4b", messages, schema)
+
+
+@pytest.mark.parametrize(
+    ("returned_model", "role", "content", "message"),
+    [
+        ("other", "assistant", "{}", "unexpected answer model"),
+        ("qwen3.5:4b", "user", "{}", "invalid answer message"),
+        ("qwen3.5:4b", "assistant", " ", "invalid answer message"),
+    ],
+)
+def test_structured_chat_rejects_untrusted_response_identity_or_message(
+    returned_model: str, role: str, content: str, message: str
+) -> None:
+    def handler(_request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            json={"model": returned_model, "message": {"role": role, "content": content}},
+        )
+
+    with (
+        OllamaClient(Settings(), transport=httpx.MockTransport(handler)) as client,
+        pytest.raises(OllamaResponseError, match=message),
+    ):
+        client.chat_structured(
+            "qwen3.5:4b",
+            [ChatMessage(role="user", content="question")],
+            {"type": "object"},
+        )
 
 
 def test_http_error_does_not_expose_response_body() -> None:

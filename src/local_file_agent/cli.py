@@ -8,6 +8,7 @@ from typing import Annotated
 import typer
 from pydantic import ValidationError
 
+from local_file_agent.answering import AnswerGenerationError, AnswerReport, answer_database
 from local_file_agent.chunking import (
     DEFAULT_CHUNK_SIZE,
     DEFAULT_OVERLAP,
@@ -281,6 +282,56 @@ def _render_search_report(report: SearchReport) -> None:
 
     if not report.content_included:
         typer.echo("\nNo retrieved text was printed. Use --show-text only for approved indexes.")
+
+
+def _render_answer_report(report: AnswerReport) -> None:
+    heading = (
+        "Grounded answer generated." if report.status == "answered" else "Answer refused safely."
+    )
+    typer.echo(heading)
+    typer.echo(f"Decision: {report.decision_reason.value}")
+    typer.echo(
+        f"Models: embedding={report.returned_embedding_model}, "
+        f"answer={report.answer_model_returned or 'not_called'}"
+    )
+    typer.echo(
+        f"Evidence: retrieved={report.retrieved_count}, context={report.context_count}, "
+        f"characters={report.context_characters}, cited={len(report.citations)}, "
+        f"budget_truncated={report.context_truncated}"
+    )
+    typer.echo(
+        f"Timing: index_load_ms={report.index_load_duration_ms}, "
+        f"query_embedding_ms={report.query_embedding_wall_duration_ms}, "
+        f"retrieval_ms={report.retrieval_wall_duration_ms}, "
+        f"generation_ms={report.generation_wall_duration_ms}, "
+        f"generation_attempts={report.generation_attempts}"
+    )
+    typer.echo(f"\nAnswer:\n{report.answer}")
+
+    if report.citations:
+        typer.echo("\nSources:")
+        for citation in report.citations:
+            typer.echo(
+                f"[{citation.citation_id}] {citation.citation} "
+                f"score={citation.similarity} sha256={citation.content_sha256[:12]}..."
+            )
+    else:
+        typer.echo("\nSources: none")
+
+    if report.context_included:
+        typer.echo(
+            "\nWARNING: Exact context sent to Qwen follows because --show-context was supplied."
+        )
+        for passage in report.context or []:
+            typer.echo(
+                f"\n[{passage.citation_id}] {passage.citation} "
+                f"score={passage.similarity} sha256={passage.content_sha256[:12]}..."
+            )
+            typer.echo(passage.text)
+    elif report.context_count:
+        typer.echo(
+            "\nRetrieved context was not printed. Use --show-context only for approved indexes."
+        )
 
 
 @app.command()
@@ -659,3 +710,72 @@ def search(
         typer.echo(report.model_dump_json(indent=2, exclude_none=True))
     else:
         _render_search_report(report)
+
+
+@app.command()
+def ask(
+    question: Annotated[
+        str,
+        typer.Argument(help="Question to answer from retrieved local evidence."),
+    ],
+    database: Annotated[
+        Path,
+        typer.Option("--db", help="Existing Local Personal File Agent SQLite index."),
+    ],
+    top_k: Annotated[
+        int,
+        typer.Option("--top-k", help="Maximum number of diverse passages to retrieve."),
+    ] = DEFAULT_SEARCH_TOP_K,
+    min_score: Annotated[
+        float,
+        typer.Option("--min-score", help="Inclusive cosine-similarity threshold."),
+    ] = DEFAULT_MIN_SCORE,
+    show_context: Annotated[
+        bool,
+        typer.Option(help="Explicitly include the exact passages sent to Qwen."),
+    ] = False,
+    json_output: Annotated[
+        bool,
+        typer.Option("--json", help="Emit a machine-readable grounded-answer report."),
+    ] = False,
+) -> None:
+    """Retrieve evidence and generate a locally grounded, cited answer."""
+
+    try:
+        settings = Settings()
+        options = SearchOptions(top_k=top_k, min_score=min_score)
+        if not question.strip():
+            raise ValueError("Answer question must not be empty.")
+    except ValidationError as exc:
+        typer.echo("Invalid FILE_AGENT configuration:", err=True)
+        for message in _safe_validation_messages(exc):
+            typer.echo(f"- {message}", err=True)
+        raise typer.Exit(code=2) from exc
+    except ValueError as exc:
+        typer.echo(f"Invalid answer options: {exc}", err=True)
+        raise typer.Exit(code=2) from exc
+
+    try:
+        with OllamaClient(settings) as client:
+            report = answer_database(
+                database,
+                question,
+                client,
+                settings.answer_model,
+                options=options,
+                include_context=show_context,
+            )
+    except (
+        AnswerGenerationError,
+        IndexStorageError,
+        OllamaError,
+        EmbeddingError,
+        RetrievalError,
+    ) as exc:
+        typer.echo(f"Answer generation failed: {exc}", err=True)
+        raise typer.Exit(code=1) from exc
+
+    if json_output:
+        typer.echo(report.model_dump_json(indent=2, exclude_none=True))
+    else:
+        _render_answer_report(report)
