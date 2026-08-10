@@ -6,9 +6,9 @@ The project is developed checkpoint by checkpoint so document ingestion, chunkin
 
 ## Current Status
 
-**Checkpoint 4 - SQLite Vector Index:** complete. Approved documents, exact chunks, provenance, and validated Float32 embeddings can now be transactionally persisted, atomically published, and reopened read-only.
+**Checkpoint 5 - Read-Only Vector Search:** complete. Questions can now be embedded with the index-recorded model and compared against every validated stored vector using deterministic cosine ranking, thresholding, and overlap suppression.
 
-**Next:** begin Checkpoint 5 - Vector Search.
+**Next:** begin Checkpoint 6 - Grounded Answer Generation and Citations.
 
 Implemented:
 
@@ -31,8 +31,12 @@ Implemented:
 - Transactional temporary builds with read-only validation before atomic replacement.
 - App-ownership, schema, foreign-key, hash, count, dimension, and vector corruption checks.
 - Metadata-only `file-agent index` and read-only `file-agent inspect-index` reports.
+- Index-first query embedding using the exact stored model, prompt strategy, and dimension.
+- Brute-force NumPy cosine retrieval with stable tie-breakers and provisional score thresholds.
+- Fixed 80% same-document overlap suppression before top-K selection.
+- Privacy-aware `file-agent search` human and JSON reports with trusted source citations.
 
-Not implemented yet: reusable vector search, overlap suppression, citations, or answer generation.
+Not implemented yet: Qwen answer generation, grounded context construction, validated answer citations, or refusal behavior.
 
 ## Mental Model
 
@@ -81,6 +85,16 @@ Documents -> Chunks -> Embeddings -> temporary SQLite transaction
                                atomic publication
                                       v
                          durable versioned local index
+```
+
+Checkpoint 5 adds independently observable retrieval:
+
+```text
+Question -> index-recorded EmbeddingGemma -> query vector
+                                              |
+read-only SQLite vectors ----------------> cosine scores
+                                              |
+                           threshold -> overlap suppression -> top-K citations
 ```
 
 ## Prerequisites
@@ -218,6 +232,24 @@ An existing valid index is not replaced unless `--force` is supplied. Even with 
 unrelated or unrecognizable file is never overwritten. Indexes contain chunk text and embeddings;
 keep them under `.data/` or another private Git-ignored location.
 
+## Search a Vector Index
+
+Search uses the exact embedding model recorded inside the index:
+
+```powershell
+uv run file-agent search `
+  "How frequently do staff passwords need to be changed?" `
+  --db .data/manual-testing/checkpoint-5/index.sqlite
+```
+
+The default policy returns at most five results with cosine score at least `0.30`, after suppressing
+same-document chunks that overlap by 80% or more. These values are provisional and must eventually
+be evaluated against representative questions.
+
+Search reports trusted relative paths, chunk numbers, offsets, and scores without printing passage
+text. Add `--show-text` only for an approved index. Search never invokes Qwen and never modifies the
+SQLite database.
+
 ## Configuration
 
 Safe defaults are shown in [.env.example](.env.example). Supported variables:
@@ -253,6 +285,7 @@ interpretation, safe failure experiments, privacy checks, and automated validati
 - [Checkpoint 2 — Deterministic chunking](docs/testing/checkpoint-2.md)
 - [Checkpoint 3 — Local embeddings](docs/testing/checkpoint-3.md)
 - [Checkpoint 4 — SQLite vector index](docs/testing/checkpoint-4.md)
+- [Checkpoint 5 — Read-only vector search](docs/testing/checkpoint-5.md)
 
 See the [manual verification index](docs/testing/README.md) for the learning workflow. Synthetic
 inputs live under `examples/`; disposable experiments belong under the Git-ignored `.data/` folder.
@@ -273,6 +306,7 @@ inputs live under `examples/`; disposable experiments belong under the Git-ignor
 - [Checkpoint 2 learning record](docs/learning/checkpoint-2.md)
 - [Checkpoint 3 learning record](docs/learning/checkpoint-3.md)
 - [Checkpoint 4 learning record](docs/learning/checkpoint-4.md)
+- [Checkpoint 5 learning record](docs/learning/checkpoint-5.md)
 - [Architecture decision: direct local Ollama boundary](docs/decisions/0001-direct-local-ollama-boundary.md)
 - [Original Notion guide](Local%20Personal%20File%20Agent%20060c2786553b82208d268122f958b13d.md)
 - [Persistent collaboration guidance](AGENTS.md)
