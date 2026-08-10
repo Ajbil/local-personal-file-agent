@@ -6,6 +6,9 @@ Verify the complete local RAG path: retrieve relevant passages, send only number
 evidence to Qwen, validate its structured response, map temporary IDs to trusted source metadata,
 and return either a cited answer or a fixed refusal.
 
+Read the [Checkpoint 6 learning record](../learning/checkpoint-6.md) first for the mental models,
+trust boundaries, tradeoffs, failure taxonomy, and known false-refusal limitation.
+
 This lab uses committed synthetic documents. Do not use `--show-context` with personal indexes in a
 terminal, screenshot, or recording you may share.
 
