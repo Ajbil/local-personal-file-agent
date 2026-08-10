@@ -38,6 +38,16 @@ from local_file_agent.indexing import (
 )
 from local_file_agent.ingestion import ScanReport, SourceRootError, scan_source
 from local_file_agent.ollama import OllamaClient, OllamaError
+from local_file_agent.retrieval import (
+    DEFAULT_MIN_SCORE,
+    RetrievalError,
+    SearchOptions,
+    SearchReport,
+    search_database,
+)
+from local_file_agent.retrieval import (
+    DEFAULT_TOP_K as DEFAULT_SEARCH_TOP_K,
+)
 from local_file_agent.storage import IndexStorageError
 
 app = typer.Typer(
@@ -231,6 +241,46 @@ def _render_index_inspection_report(report: IndexInspectionReport) -> None:
         f"foreign_keys_valid={report.foreign_keys_valid}"
     )
     typer.echo("No document text or vector coordinates were printed.")
+
+
+def _render_search_report(report: SearchReport) -> None:
+    typer.echo("Read-only vector search completed.")
+    typer.echo(
+        f"Model: stored={report.stored_embedding_model}, "
+        f"returned={report.returned_embedding_model}, "
+        f"dimension={report.embedding_dimension}"
+    )
+    typer.echo(
+        f"Policy: top_k={report.top_k}, min_score={report.min_score}, "
+        f"max_overlap_ratio={report.max_overlap_ratio}"
+    )
+    typer.echo(
+        f"Candidates: indexed={report.indexed_chunk_count}, "
+        f"above_threshold={report.above_threshold_count}, "
+        f"suppressed={report.suppressed_count}, selected={report.result_count}"
+    )
+    typer.echo(
+        f"Timing: index_load_ms={report.index_load_duration_ms}, "
+        f"query_embedding_ms={report.query_embedding_wall_duration_ms}, "
+        f"retrieval_ms={report.retrieval_wall_duration_ms}"
+    )
+
+    if not report.results:
+        typer.echo(f"\nNo chunks met min_score={report.min_score}.")
+        return
+    if report.content_included:
+        typer.echo("\nWARNING: Exact retrieved text follows because --show-text was supplied.")
+
+    for result in report.results:
+        typer.echo(
+            f"\n[{result.rank}] {result.citation} "
+            f"score={result.similarity} sha256={result.content_sha256[:12]}..."
+        )
+        if result.text is not None:
+            typer.echo(result.text)
+
+    if not report.content_included:
+        typer.echo("\nNo retrieved text was printed. Use --show-text only for approved indexes.")
 
 
 @app.command()
@@ -547,3 +597,65 @@ def inspect_index(
         typer.echo(report.model_dump_json(indent=2))
     else:
         _render_index_inspection_report(report)
+
+
+@app.command()
+def search(
+    question: Annotated[
+        str,
+        typer.Argument(help="Question to compare with the persisted chunk vectors."),
+    ],
+    database: Annotated[
+        Path,
+        typer.Option("--db", help="Existing Local Personal File Agent SQLite index."),
+    ],
+    top_k: Annotated[
+        int,
+        typer.Option("--top-k", help="Maximum number of diverse results to return."),
+    ] = DEFAULT_SEARCH_TOP_K,
+    min_score: Annotated[
+        float,
+        typer.Option("--min-score", help="Inclusive cosine-similarity threshold."),
+    ] = DEFAULT_MIN_SCORE,
+    show_text: Annotated[
+        bool,
+        typer.Option(help="Explicitly include exact selected chunk text in the output."),
+    ] = False,
+    json_output: Annotated[
+        bool,
+        typer.Option("--json", help="Emit a machine-readable search report."),
+    ] = False,
+) -> None:
+    """Retrieve relevant passages from a validated read-only SQLite index."""
+
+    try:
+        settings = Settings()
+        options = SearchOptions(top_k=top_k, min_score=min_score)
+        if not question.strip():
+            raise ValueError("Search question must not be empty.")
+    except ValidationError as exc:
+        typer.echo("Invalid FILE_AGENT configuration:", err=True)
+        for message in _safe_validation_messages(exc):
+            typer.echo(f"- {message}", err=True)
+        raise typer.Exit(code=2) from exc
+    except ValueError as exc:
+        typer.echo(f"Invalid search options: {exc}", err=True)
+        raise typer.Exit(code=2) from exc
+
+    try:
+        with OllamaClient(settings) as client:
+            report = search_database(
+                database,
+                question,
+                client,
+                options=options,
+                include_text=show_text,
+            )
+    except (IndexStorageError, OllamaError, EmbeddingError, RetrievalError) as exc:
+        typer.echo(f"Search failed: {exc}", err=True)
+        raise typer.Exit(code=1) from exc
+
+    if json_output:
+        typer.echo(report.model_dump_json(indent=2, exclude_none=True))
+    else:
+        _render_search_report(report)

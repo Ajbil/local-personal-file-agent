@@ -2,9 +2,9 @@
 
 ## Project Status
 
-- Current milestone: Checkpoint 4 — SQLite Vector Index (complete)
-- Next milestone: Checkpoint 5 — Vector Search
-- Implementation status: Checkpoint 4 passed schema, transaction, atomic replacement, provenance, corruption, privacy, and regression validation
+- Current milestone: Checkpoint 5 — Vector Search (complete)
+- Next milestone: Checkpoint 6 — Grounded Answer Generation and Citations
+- Implementation status: Checkpoint 5 passed ranking, threshold, deterministic tie, overlap suppression, read-only, privacy, and regression validation
 
 ## Summary
 

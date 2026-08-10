@@ -3,6 +3,7 @@
 import json
 from collections.abc import Sequence
 from pathlib import Path
+from typing import ClassVar
 
 import numpy as np
 import pytest
@@ -46,6 +47,7 @@ def test_help_exposes_doctor_command() -> None:
     assert "inspect-index" in result.stdout
     assert "index" in result.stdout
     assert "scan" in result.stdout
+    assert "search" in result.stdout
 
 
 def test_invalid_remote_configuration_returns_exit_code_two(
@@ -720,3 +722,141 @@ def test_inspect_index_rejects_unrelated_database(tmp_path: Path) -> None:
     assert result.exit_code == 1
     assert "Index inspection failed" in result.output
     assert str(database) not in result.output
+
+
+class SearchClient(DummyClient):
+    requested_models: ClassVar[list[str]] = []
+
+    def embed(
+        self,
+        model: str,
+        inputs: Sequence[str],
+        *,
+        truncate: bool = False,
+    ) -> EmbeddingBatch:
+        assert truncate is False
+        self.requested_models.append(model)
+        return EmbeddingBatch(model="embeddinggemma", vectors=[[1.0, 1.0]])
+
+
+class NoMatchSearchClient(SearchClient):
+    def embed(
+        self,
+        model: str,
+        inputs: Sequence[str],
+        *,
+        truncate: bool = False,
+    ) -> EmbeddingBatch:
+        assert truncate is False
+        self.requested_models.append(model)
+        return EmbeddingBatch(model="embeddinggemma", vectors=[[-1.0, -1.0]])
+
+
+def _build_search_test_index(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, content: str) -> Path:
+    source = tmp_path / "source"
+    source.mkdir()
+    (source / "note.md").write_text(content, encoding="utf-8")
+    database = tmp_path / "index.sqlite"
+    monkeypatch.setattr(cli, "OllamaClient", IndexClient)
+    result = runner.invoke(
+        cli.app,
+        ["index", "--source", str(source), "--db", str(database)],
+    )
+    assert result.exit_code == 0
+    return database
+
+
+def test_search_is_private_read_only_and_uses_index_model(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    secret = "PRIVATE RETRIEVED PASSAGE"
+    database = _build_search_test_index(tmp_path, monkeypatch, secret)
+    before = (database.read_bytes(), database.stat().st_mtime_ns)
+    SearchClient.requested_models.clear()
+    monkeypatch.setattr(cli, "OllamaClient", SearchClient)
+    monkeypatch.setenv("FILE_AGENT_EMBEDDING_MODEL", "different-configured-model")
+
+    result = runner.invoke(
+        cli.app,
+        ["search", "PRIVATE QUERY", "--db", str(database)],
+    )
+
+    assert result.exit_code == 0
+    assert "Read-only vector search completed" in result.output
+    assert "note.md#chunk-0" in result.output
+    assert "score=" in result.output
+    assert secret not in result.output
+    assert "PRIVATE QUERY" not in result.output
+    assert str(database) not in result.output
+    assert "No retrieved text was printed" in result.output
+    assert SearchClient.requested_models == ["embeddinggemma"]
+    assert (database.read_bytes(), database.stat().st_mtime_ns) == before
+
+
+def test_search_show_text_is_explicit(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    content = "A synthetic passage safe to display."
+    database = _build_search_test_index(tmp_path, monkeypatch, content)
+    monkeypatch.setattr(cli, "OllamaClient", SearchClient)
+
+    result = runner.invoke(
+        cli.app,
+        ["search", "question", "--db", str(database), "--show-text"],
+    )
+
+    assert result.exit_code == 0
+    assert "WARNING: Exact retrieved text follows" in result.output
+    assert content in result.output
+
+
+def test_search_json_is_metadata_only_by_default(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    content = "JSON-PRIVATE-PASSAGE"
+    database = _build_search_test_index(tmp_path, monkeypatch, content)
+    monkeypatch.setattr(cli, "OllamaClient", SearchClient)
+
+    result = runner.invoke(
+        cli.app,
+        ["search", "private query", "--db", str(database), "--json"],
+    )
+
+    assert result.exit_code == 0
+    payload = json.loads(result.stdout)
+    assert payload["content_included"] is False
+    assert payload["result_count"] == 1
+    assert "text" not in payload["results"][0]
+    assert "query" not in payload
+    assert content not in result.stdout
+
+
+def test_search_zero_matches_is_successful(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    database = _build_search_test_index(tmp_path, monkeypatch, "unrelated")
+    monkeypatch.setattr(cli, "OllamaClient", NoMatchSearchClient)
+
+    result = runner.invoke(
+        cli.app,
+        ["search", "question", "--db", str(database), "--min-score", "0.3"],
+    )
+
+    assert result.exit_code == 0
+    assert "No chunks met min_score=0.3" in result.output
+
+
+@pytest.mark.parametrize(
+    ("arguments", "message"),
+    [
+        (["question", "--top-k", "0"], "Top-k"),
+        (["question", "--top-k", "101"], "Top-k"),
+        (["question", "--min-score", "1.1"], "Minimum score"),
+        (["   "], "must not be empty"),
+    ],
+)
+def test_search_rejects_invalid_options(tmp_path: Path, arguments: list[str], message: str) -> None:
+    result = runner.invoke(
+        cli.app,
+        ["search", *arguments, "--db", str(tmp_path / "index.sqlite")],
+    )
+
+    assert result.exit_code == 2
+    assert "Invalid search options" in result.output
+    assert message in result.output
