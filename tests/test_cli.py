@@ -49,6 +49,7 @@ def test_help_exposes_doctor_command() -> None:
     assert "scan" in result.stdout
     assert "search" in result.stdout
     assert "ask" in result.stdout
+    assert "evaluate" in result.stdout
 
 
 def test_invalid_remote_configuration_returns_exit_code_two(
