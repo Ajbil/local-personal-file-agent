@@ -46,6 +46,14 @@ from local_file_agent.indexing import (
     inspect_index as inspect_stored_index,
 )
 from local_file_agent.ingestion import ScanReport, SourceRootError, scan_source
+from local_file_agent.observability import (
+    LogLevel,
+    SafeLogFields,
+    configure_observability,
+    mark_observation_failure,
+    observed_command,
+    record_observation,
+)
 from local_file_agent.ollama import OllamaClient, OllamaError
 from local_file_agent.retrieval import (
     DEFAULT_MIN_SCORE,
@@ -67,8 +75,18 @@ app = typer.Typer(
 
 
 @app.callback()
-def main() -> None:
+def main(
+    log_level: Annotated[
+        LogLevel,
+        typer.Option(
+            "--log-level",
+            help="Emit privacy-safe JSONL events to stderr: off, error, or info.",
+        ),
+    ] = LogLevel.OFF,
+) -> None:
     """Run local-file RAG commands."""
+
+    configure_observability(log_level)
 
 
 def _render_human(report: DoctorReport) -> None:
@@ -371,6 +389,7 @@ def _render_answer_report(report: AnswerReport) -> None:
 
 
 @app.command()
+@observed_command("doctor")
 def doctor(
     skip_generation: Annotated[
         bool,
@@ -394,16 +413,31 @@ def doctor(
     with OllamaClient(settings) as client:
         report = run_doctor(settings, client, skip_generation=skip_generation)
 
+    record_observation(
+        SafeLogFields(
+            endpoint_scope="loopback",
+            embedding_model=settings.embedding_model,
+            answer_model=settings.answer_model,
+            full_readiness=report.full_readiness,
+            case_count=len(report.checks),
+            passed_count=sum(check.status.value == "PASS" for check in report.checks),
+            failed_count=sum(check.status.value == "FAIL" for check in report.checks),
+        ),
+        outcome="ready" if report.full_readiness else "not_ready",
+    )
+
     if json_output:
         typer.echo(report.model_dump_json(indent=2))
     else:
         _render_human(report)
 
     if not report.success:
+        mark_observation_failure("readiness_check")
         raise typer.Exit(code=1)
 
 
 @app.command()
+@observed_command("scan")
 def scan(
     source: Annotated[
         Path,
@@ -422,6 +456,13 @@ def scan(
         typer.echo(f"Source folder rejected: {exc}", err=True)
         raise typer.Exit(code=1) from exc
 
+    record_observation(
+        SafeLogFields(
+            accepted_count=outcome.report.summary.accepted_files,
+            skipped_count=outcome.report.summary.skipped_entries,
+        )
+    )
+
     if json_output:
         typer.echo(outcome.report.model_dump_json(indent=2))
     else:
@@ -429,6 +470,7 @@ def scan(
 
 
 @app.command()
+@observed_command("inspect-chunks")
 def inspect_chunks(
     source: Annotated[
         Path,
@@ -476,10 +518,18 @@ def inspect_chunks(
     )
     if selected is None:
         typer.echo("Selected document was not accepted or found.", err=True)
+        mark_observation_failure("document_selection")
         raise typer.Exit(code=1)
 
     chunks = chunk_document(selected, options)
     report = build_inspection_report(selected, chunks, options, include_text=show_text)
+    record_observation(
+        SafeLogFields(
+            chunk_count=report.chunk_count,
+            chunk_size=report.chunk_size,
+            overlap=report.overlap,
+        )
+    )
     if json_output:
         typer.echo(report.model_dump_json(indent=2, exclude_none=True))
     else:
@@ -487,6 +537,7 @@ def inspect_chunks(
 
 
 @app.command()
+@observed_command("inspect-embeddings")
 def inspect_embeddings(
     source: Annotated[
         Path,
@@ -558,11 +609,13 @@ def inspect_embeddings(
     )
     if selected is None:
         typer.echo("Selected document was not accepted or found.", err=True)
+        mark_observation_failure("document_selection")
         raise typer.Exit(code=1)
 
     chunks = chunk_document(selected, options)
     if not chunks:
         typer.echo("Selected document did not produce any chunks.", err=True)
+        mark_observation_failure("empty_chunk_set")
         raise typer.Exit(code=1)
 
     try:
@@ -587,6 +640,24 @@ def inspect_embeddings(
         typer.echo(f"Embedding inspection failed: {exc}", err=True)
         raise typer.Exit(code=1) from exc
 
+    record_observation(
+        SafeLogFields(
+            endpoint_scope="loopback",
+            embedding_model=report.returned_model,
+            dimension=report.dimension,
+            chunk_count=report.chunk_count,
+            embedding_count=report.vector_count,
+            batch_count=report.batch_count,
+            batch_size=report.batch_size,
+            chunk_size=report.chunk_size,
+            overlap=report.overlap,
+            top_k=top_k,
+            result_count=len(report.results),
+            top_score=report.results[0].similarity if report.results else None,
+            lowest_selected_score=report.results[-1].similarity if report.results else None,
+        )
+    )
+
     if json_output:
         typer.echo(report.model_dump_json(indent=2, exclude_none=True))
     else:
@@ -594,6 +665,7 @@ def inspect_embeddings(
 
 
 @app.command("index")
+@observed_command("index")
 def index_documents(
     source: Annotated[
         Path,
@@ -655,6 +727,22 @@ def index_documents(
         typer.echo(f"Index build failed: {exc}", err=True)
         raise typer.Exit(code=1) from exc
 
+    record_observation(
+        SafeLogFields(
+            endpoint_scope="loopback",
+            embedding_model=report.embedding_model,
+            dimension=report.embedding_dimension,
+            accepted_count=report.accepted_documents,
+            skipped_count=report.skipped_entries,
+            chunk_count=report.chunk_count,
+            embedding_count=report.embedding_count,
+            batch_count=report.batch_count,
+            batch_size=report.batch_size,
+            chunk_size=report.chunk_size,
+            overlap=report.overlap,
+        )
+    )
+
     if json_output:
         typer.echo(report.model_dump_json(indent=2, exclude_none=True))
     else:
@@ -662,6 +750,7 @@ def index_documents(
 
 
 @app.command()
+@observed_command("inspect-index")
 def inspect_index(
     database: Annotated[
         Path,
@@ -680,6 +769,18 @@ def inspect_index(
         typer.echo(f"Index inspection failed: {exc}", err=True)
         raise typer.Exit(code=1) from exc
 
+    record_observation(
+        SafeLogFields(
+            embedding_model=report.embedding_model,
+            dimension=report.embedding_dimension,
+            document_count=report.document_count,
+            chunk_count=report.chunk_count,
+            embedding_count=report.embedding_count,
+            chunk_size=report.chunk_size,
+            overlap=report.overlap,
+        )
+    )
+
     if json_output:
         typer.echo(report.model_dump_json(indent=2))
     else:
@@ -687,6 +788,7 @@ def inspect_index(
 
 
 @app.command()
+@observed_command("search")
 def search(
     question: Annotated[
         str,
@@ -742,6 +844,21 @@ def search(
         typer.echo(f"Search failed: {exc}", err=True)
         raise typer.Exit(code=1) from exc
 
+    record_observation(
+        SafeLogFields(
+            endpoint_scope="loopback",
+            embedding_model=report.returned_embedding_model,
+            dimension=report.embedding_dimension,
+            chunk_count=report.indexed_chunk_count,
+            result_count=report.result_count,
+            top_k=report.top_k,
+            min_score=report.min_score,
+            top_score=report.results[0].similarity if report.results else None,
+            lowest_selected_score=report.results[-1].similarity if report.results else None,
+        ),
+        outcome="results" if report.result_count else "no_results",
+    )
+
     if json_output:
         typer.echo(report.model_dump_json(indent=2, exclude_none=True))
     else:
@@ -749,6 +866,7 @@ def search(
 
 
 @app.command()
+@observed_command("evaluate")
 def evaluate(
     manifest: Annotated[
         Path,
@@ -829,15 +947,35 @@ def evaluate(
         typer.echo(f"Evaluation failed to run: {exc}", err=True)
         raise typer.Exit(code=1) from exc
 
+    record_observation(
+        SafeLogFields(
+            endpoint_scope="loopback" if mode is EvaluationMode.LIVE else None,
+            mode=report.mode.value,
+            embedding_model=report.embedding_model,
+            answer_model=report.answer_model,
+            chunk_size=report.chunk_size,
+            overlap=report.overlap,
+            top_k=report.top_k,
+            min_score=report.min_score,
+            case_count=report.case_count,
+            passed_count=report.passed_cases,
+            failed_count=report.failed_cases,
+            security_leakage_count=report.metrics.security_leakage_count,
+        ),
+        outcome="evaluation_passed" if report.status == "passed" else "evaluation_failed",
+    )
+
     if json_output:
         typer.echo(report.model_dump_json(indent=2, exclude_none=True))
     else:
         _render_evaluation_report(report)
     if report.status == "failed":
+        mark_observation_failure("quality_gate")
         raise typer.Exit(code=1)
 
 
 @app.command()
+@observed_command("ask")
 def ask(
     question: Annotated[
         str,
@@ -899,6 +1037,21 @@ def ask(
     ) as exc:
         typer.echo(f"Answer generation failed: {exc}", err=True)
         raise typer.Exit(code=1) from exc
+
+    record_observation(
+        SafeLogFields(
+            endpoint_scope="loopback",
+            embedding_model=report.returned_embedding_model,
+            answer_model=report.answer_model_returned or report.answer_model_requested,
+            decision=report.decision_reason.value,
+            chunk_count=report.indexed_chunk_count,
+            result_count=report.retrieved_count,
+            citation_count=len(report.citations),
+            top_k=report.top_k,
+            min_score=report.min_score,
+        ),
+        outcome=report.status,
+    )
 
     if json_output:
         typer.echo(report.model_dump_json(indent=2, exclude_none=True))

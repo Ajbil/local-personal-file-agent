@@ -32,5 +32,6 @@ For each checkpoint:
 - [Checkpoint 5 — Read-only vector search](checkpoint-5.md)
 - [Checkpoint 6 — Grounded answers and trusted citations](checkpoint-6.md)
 - [Checkpoint 7 — Evaluation and security regression suite](checkpoint-7.md)
+- [Checkpoint 8 — Hardening and senior-engineer retrospective](checkpoint-8.md)
 
 Commands target Windows PowerShell because Windows is the project's baseline platform.

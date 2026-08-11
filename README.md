@@ -6,11 +6,12 @@ The project is developed checkpoint by checkpoint so document ingestion, chunkin
 
 ## Current Status
 
-**Checkpoint 7 - Evaluation and Security Regression Suite:** complete. A versioned synthetic suite
-now measures retrieval, answer facts, trusted citations, refusal behavior, prompt-injection canary
-leakage, and latency through deterministic and live local-model modes.
+**Checkpoint 8 - Hardening and Senior-Engineer Retrospective:** complete. The planned local learning
+baseline now includes opt-in privacy-safe structured observability, a threat model, recorded
+architectural decisions, explicit limitations, and an evidence-driven production evolution map.
 
-**Next:** begin Checkpoint 8 - Hardening and Senior-Engineer Retrospective.
+**Project milestone:** all eight planned checkpoints are complete. The application remains an
+inspectable single-user learning baseline, not an enterprise production service.
 
 Implemented:
 
@@ -47,9 +48,15 @@ Implemented:
 - Live EmbeddingGemma/Qwen evaluation with stage-specific diagnostics.
 - Hit@K, MRR, fact, citation, refusal, leakage, and latency metrics without content logging.
 - Disposable Git-ignored evaluation indexes and automation-friendly exit codes.
+- Opt-in versioned JSONL command events on stderr with a strict privacy allowlist.
+- Threat model separating deterministic controls, model behavior, assumptions, and residual risk.
+- Architecture decisions for the local runtime, SQLite retrieval, trusted citations, and logging.
+- Production evolution map with measurable adoption triggers and new-risk analysis.
 
-Not implemented yet: production hardening documentation, structured operational logging,
-production packaging, or a web interface.
+Intentional limitations include text formats only, character chunking, full index rebuilds,
+brute-force search, a single-user CLI, no ACLs/encryption, a small local model, and a limited
+synthetic evaluation corpus. See the threat model and production evolution map before extending the
+baseline.
 
 ## Mental Model
 
@@ -122,6 +129,17 @@ Question -> Checkpoint 5 retrieval -> numbered untrusted passages -> local Qwen 
 
 Qwen acts as a writer, not a provenance authority. Prompt instructions guide the writer; strict
 schema and citation validation enforce the application boundary.
+
+Checkpoint 8 adds an operational boundary around every command:
+
+```text
+CLI command -> safe typed lifecycle metrics -> optional JSONL stderr
+       |
+       +-> unchanged human or machine-readable stdout
+```
+
+Logging has no access to arbitrary content fields, is disabled by default, and cannot change a
+command result if its output sink fails.
 
 ## Prerequisites
 
@@ -313,6 +331,28 @@ Each run builds and deletes a disposable index. Reports contain metrics, case ID
 counts, and timings but omit questions, passages, answers, vectors, canaries, and absolute paths.
 Deterministic mode is suitable for normal development; live mode may take several minutes on CPU.
 
+## Enable Privacy-Safe Operational Events
+
+Enable INFO lifecycle events for one command:
+
+```powershell
+uv run file-agent --log-level info evaluate --mode deterministic
+```
+
+Emit only failure events:
+
+```powershell
+uv run file-agent --log-level error evaluate --mode deterministic
+```
+
+Events are versioned JSON Lines written to stderr. Normal output—including `--json`—remains on
+stdout. Logs include allowlisted counts, model/configuration identifiers, scores, decisions,
+latency, and safe error categories. They exclude questions, answers, passages, prompts, paths,
+citations, hashes, vectors, raw model/HTTP output, and canaries.
+
+No log file is created automatically. If you deliberately redirect stderr, keep it in `.data/` or
+another private ignored directory and delete it when no longer needed.
+
 ## Configuration
 
 Safe defaults are shown in [.env.example](.env.example). Supported variables:
@@ -353,6 +393,7 @@ interpretation, safe failure experiments, privacy checks, and automated validati
 - [Checkpoint 5 — Read-only vector search](docs/testing/checkpoint-5.md)
 - [Checkpoint 6 — Grounded answers and trusted citations](docs/testing/checkpoint-6.md)
 - [Checkpoint 7 — Evaluation and security regression suite](docs/testing/checkpoint-7.md)
+- [Checkpoint 8 — Hardening and senior-engineer retrospective](docs/testing/checkpoint-8.md)
 
 See the [manual verification index](docs/testing/README.md) for the learning workflow. Synthetic
 inputs live under `examples/`; disposable experiments belong under the Git-ignored `.data/` folder.
@@ -376,6 +417,12 @@ inputs live under `examples/`; disposable experiments belong under the Git-ignor
 - [Checkpoint 5 learning record](docs/learning/checkpoint-5.md)
 - [Checkpoint 6 learning record](docs/learning/checkpoint-6.md)
 - [Checkpoint 7 learning record](docs/learning/checkpoint-7.md)
+- [Checkpoint 8 learning record](docs/learning/checkpoint-8.md)
+- [Threat model](docs/threat-model.md)
+- [Production evolution map](docs/production-evolution.md)
 - [Architecture decision: direct local Ollama boundary](docs/decisions/0001-direct-local-ollama-boundary.md)
+- [Architecture decision: SQLite brute-force retrieval](docs/decisions/0002-sqlite-brute-force-retrieval.md)
+- [Architecture decision: application-owned citations](docs/decisions/0003-application-owned-citations.md)
+- [Architecture decision: opt-in structured observability](docs/decisions/0004-opt-in-structured-observability.md)
 - [Original Notion guide](Local%20Personal%20File%20Agent%20060c2786553b82208d268122f958b13d.md)
 - [Persistent collaboration guidance](AGENTS.md)
