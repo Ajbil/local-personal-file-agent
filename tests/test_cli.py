@@ -50,6 +50,7 @@ def test_help_exposes_doctor_command() -> None:
     assert "search" in result.stdout
     assert "ask" in result.stdout
     assert "evaluate" in result.stdout
+    assert "--log-level" in result.stdout
 
 
 def test_invalid_remote_configuration_returns_exit_code_two(
@@ -978,13 +979,25 @@ def test_ask_zero_matches_is_successful_refusal_without_qwen(
 
     result = runner.invoke(
         cli.app,
-        ["ask", "unsupported", "--db", str(database), "--min-score", "0.3"],
+        [
+            "--log-level",
+            "info",
+            "ask",
+            "unsupported",
+            "--db",
+            str(database),
+            "--min-score",
+            "0.3",
+        ],
     )
 
     assert result.exit_code == 0
     assert "Answer refused safely" in result.output
     assert "Sources: none" in result.output
     assert "generation_attempts=0" in result.output
+    event = json.loads(result.stderr.splitlines()[-1])
+    assert event["outcome"] == "refused"
+    assert event["fields"]["citation_count"] == 0
 
 
 def test_ask_malformed_output_fails_without_leaking_raw_response(

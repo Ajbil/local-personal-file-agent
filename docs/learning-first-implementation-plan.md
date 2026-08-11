@@ -2,10 +2,10 @@
 
 ## Project Status
 
-- Current milestone: Checkpoint 7 — Evaluation and Security Regression Suite (complete)
-- Next milestone: Checkpoint 8 — Hardening and Senior-Engineer Retrospective
-- Implementation status: Checkpoint 7 passed deterministic and live retrieval, fact, citation,
-  refusal, prompt-injection canary, privacy, cleanup, exit-code, and regression validation
+- Current milestone: Checkpoint 8 — Hardening and Senior-Engineer Retrospective (complete)
+- Next milestone: Planned local learning baseline complete
+- Implementation status: Checkpoint 8 passed opt-in structured-observability, stdout/stderr
+  separation, privacy-allowlist, failure-category, documentation, and final regression validation
 
 ## Summary
 
