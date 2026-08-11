@@ -28,6 +28,14 @@ from local_file_agent.embeddings import (
     EmbeddingService,
     build_embedding_inspection_report,
 )
+from local_file_agent.evaluation import (
+    DEFAULT_MANIFEST,
+    EvaluationError,
+    EvaluationInputError,
+    EvaluationMode,
+    EvaluationReport,
+    run_evaluation,
+)
 from local_file_agent.indexing import (
     IndexBuildError,
     IndexBuildReport,
@@ -79,6 +87,34 @@ def _safe_validation_messages(exc: ValidationError) -> list[str]:
         location = ".".join(str(part) for part in error["loc"])
         messages.append(f"{location}: {error['msg']}")
     return messages
+
+
+def _render_evaluation_report(report: EvaluationReport) -> None:
+    typer.echo(
+        f"Evaluation {report.status.upper()}: {report.passed_cases}/{report.case_count} cases"
+    )
+    typer.echo(f"Mode: {report.mode.value}")
+    typer.echo(
+        f"Retrieval: hit@{report.top_k}={report.metrics.hit_at_k:.3f}, "
+        f"MRR={report.metrics.mean_reciprocal_rank:.3f}"
+    )
+    typer.echo(
+        f"Answers: facts={report.metrics.answer_fact_accuracy:.3f}, "
+        f"refusals={report.metrics.refusal_accuracy:.3f}"
+    )
+    typer.echo(
+        f"Citations: valid={report.metrics.citation_validity:.3f}, "
+        f"precise={report.metrics.citation_precision:.3f}"
+    )
+    typer.echo(f"Security leakage count: {report.metrics.security_leakage_count}")
+    typer.echo("\nCases (content intentionally omitted):")
+    for case in report.cases:
+        state = "PASS" if case.passed else "FAIL"
+        rank = case.first_relevant_rank if case.first_relevant_rank is not None else "n/a"
+        suffix = f", failure_stage={case.failure_stage}" if case.failure_stage else ""
+        typer.echo(
+            f"[{state}] {case.case_id}: rank={rank}, decision={case.decision_reason}{suffix}"
+        )
 
 
 def _render_scan_report(report: ScanReport) -> None:
@@ -710,6 +746,95 @@ def search(
         typer.echo(report.model_dump_json(indent=2, exclude_none=True))
     else:
         _render_search_report(report)
+
+
+@app.command()
+def evaluate(
+    manifest: Annotated[
+        Path,
+        typer.Option("--manifest", help="Strict synthetic evaluation manifest."),
+    ] = DEFAULT_MANIFEST,
+    mode: Annotated[
+        EvaluationMode,
+        typer.Option("--mode", help="Offline deterministic or real local-model evaluation."),
+    ] = EvaluationMode.DETERMINISTIC,
+    chunk_size: Annotated[
+        int | None,
+        typer.Option("--chunk-size", help="Override the manifest chunk size."),
+    ] = None,
+    overlap: Annotated[
+        int | None,
+        typer.Option("--overlap", help="Override the manifest chunk overlap."),
+    ] = None,
+    top_k: Annotated[
+        int | None,
+        typer.Option("--top-k", help="Override the manifest retrieval depth."),
+    ] = None,
+    min_score: Annotated[
+        float | None,
+        typer.Option("--min-score", help="Override the mode-specific similarity threshold."),
+    ] = None,
+    json_output: Annotated[
+        bool,
+        typer.Option("--json", help="Emit a privacy-safe machine-readable report."),
+    ] = False,
+) -> None:
+    """Run the disposable synthetic quality and security regression suite."""
+
+    try:
+        settings = Settings() if mode is EvaluationMode.LIVE else None
+    except ValidationError as exc:
+        typer.echo("Invalid FILE_AGENT configuration:", err=True)
+        for message in _safe_validation_messages(exc):
+            typer.echo(f"- {message}", err=True)
+        raise typer.Exit(code=2) from exc
+
+    try:
+        if mode is EvaluationMode.LIVE:
+            assert settings is not None
+            with OllamaClient(settings) as client:
+                report = run_evaluation(
+                    manifest,
+                    mode=mode,
+                    live_gateway=client,
+                    live_embedding_model=settings.embedding_model,
+                    live_answer_model=settings.answer_model,
+                    chunk_size=chunk_size,
+                    overlap=overlap,
+                    top_k=top_k,
+                    min_score=min_score,
+                )
+        else:
+            report = run_evaluation(
+                manifest,
+                mode=mode,
+                chunk_size=chunk_size,
+                overlap=overlap,
+                top_k=top_k,
+                min_score=min_score,
+            )
+    except EvaluationInputError as exc:
+        typer.echo(f"Invalid evaluation options: {exc}", err=True)
+        raise typer.Exit(code=2) from exc
+    except (
+        AnswerGenerationError,
+        EmbeddingError,
+        EvaluationError,
+        IndexBuildError,
+        IndexStorageError,
+        OllamaError,
+        RetrievalError,
+        SourceRootError,
+    ) as exc:
+        typer.echo(f"Evaluation failed to run: {exc}", err=True)
+        raise typer.Exit(code=1) from exc
+
+    if json_output:
+        typer.echo(report.model_dump_json(indent=2, exclude_none=True))
+    else:
+        _render_evaluation_report(report)
+    if report.status == "failed":
+        raise typer.Exit(code=1)
 
 
 @app.command()

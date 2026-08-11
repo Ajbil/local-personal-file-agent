@@ -2,10 +2,10 @@
 
 ## Project Status
 
-- Current milestone: Checkpoint 6 — Grounded Answer Generation and Trusted Citations (complete)
-- Next milestone: Checkpoint 7 — Evaluation and Security Regression Suite
-- Implementation status: Checkpoint 6 passed structured-output, refusal, retry, provenance,
-  prompt-boundary, context-budget, read-only, privacy, and regression validation
+- Current milestone: Checkpoint 7 — Evaluation and Security Regression Suite (complete)
+- Next milestone: Checkpoint 8 — Hardening and Senior-Engineer Retrospective
+- Implementation status: Checkpoint 7 passed deterministic and live retrieval, fact, citation,
+  refusal, prompt-injection canary, privacy, cleanup, exit-code, and regression validation
 
 ## Summary
 

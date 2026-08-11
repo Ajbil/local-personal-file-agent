@@ -6,11 +6,11 @@ The project is developed checkpoint by checkpoint so document ingestion, chunkin
 
 ## Current Status
 
-**Checkpoint 6 - Grounded Answer Generation and Trusted Citations:** complete. Retrieved passages
-are now sent as bounded, numbered, untrusted evidence to local Qwen. Strict structured-output and
-application-owned provenance validation return either a cited answer or a fixed refusal.
+**Checkpoint 7 - Evaluation and Security Regression Suite:** complete. A versioned synthetic suite
+now measures retrieval, answer facts, trusted citations, refusal behavior, prompt-injection canary
+leakage, and latency through deterministic and live local-model modes.
 
-**Next:** begin Checkpoint 7 - Evaluation and Security Regression Suite.
+**Next:** begin Checkpoint 8 - Hardening and Senior-Engineer Retrospective.
 
 Implemented:
 
@@ -42,9 +42,14 @@ Implemented:
 - Strict answer schema, one malformed-output retry, and fail-closed semantic validation.
 - Application-owned citation mapping and fixed unsupported-question refusal.
 - Privacy-aware `file-agent ask` human and JSON reports with opt-in context inspection.
+- Strict synthetic evaluation manifest and corpus with path, expectation, and canary validation.
+- Fast offline hashed-lexical evaluation through production indexing and retrieval.
+- Live EmbeddingGemma/Qwen evaluation with stage-specific diagnostics.
+- Hit@K, MRR, fact, citation, refusal, leakage, and latency metrics without content logging.
+- Disposable Git-ignored evaluation indexes and automation-friendly exit codes.
 
-Not implemented yet: automated retrieval/answer evaluation metrics, canary-based prompt-injection
-regression scoring, production packaging, or a web interface.
+Not implemented yet: production hardening documentation, structured operational logging,
+production packaging, or a web interface.
 
 ## Mental Model
 
@@ -290,6 +295,24 @@ The default output hides retrieved context. Add `--show-context` only for an app
 answer itself is derived from document content and may still be sensitive. `ask`, like `search`,
 opens the SQLite index read-only.
 
+## Evaluate Quality and Security
+
+Run the fast, offline regression gate:
+
+```powershell
+uv run file-agent evaluate --mode deterministic
+```
+
+Run the real local EmbeddingGemma/Qwen benchmark:
+
+```powershell
+uv run file-agent evaluate --mode live
+```
+
+Each run builds and deletes a disposable index. Reports contain metrics, case IDs, decisions, ranks,
+counts, and timings but omit questions, passages, answers, vectors, canaries, and absolute paths.
+Deterministic mode is suitable for normal development; live mode may take several minutes on CPU.
+
 ## Configuration
 
 Safe defaults are shown in [.env.example](.env.example). Supported variables:
@@ -313,7 +336,9 @@ uv run mypy src tests
 uv run pytest --cov=local_file_agent --cov-report=term-missing
 ```
 
-Normal tests mock the Ollama HTTP boundary, which keeps them fast and deterministic. Live model validation is performed through `file-agent doctor` and future tests marked `live`.
+Normal tests use deterministic gateways, which keeps them fast and independent of Ollama. Live
+model validation is performed explicitly through `file-agent doctor` and
+`file-agent evaluate --mode live`.
 
 ## Manual Checkpoint Verification
 
@@ -327,6 +352,7 @@ interpretation, safe failure experiments, privacy checks, and automated validati
 - [Checkpoint 4 — SQLite vector index](docs/testing/checkpoint-4.md)
 - [Checkpoint 5 — Read-only vector search](docs/testing/checkpoint-5.md)
 - [Checkpoint 6 — Grounded answers and trusted citations](docs/testing/checkpoint-6.md)
+- [Checkpoint 7 — Evaluation and security regression suite](docs/testing/checkpoint-7.md)
 
 See the [manual verification index](docs/testing/README.md) for the learning workflow. Synthetic
 inputs live under `examples/`; disposable experiments belong under the Git-ignored `.data/` folder.
@@ -349,6 +375,7 @@ inputs live under `examples/`; disposable experiments belong under the Git-ignor
 - [Checkpoint 4 learning record](docs/learning/checkpoint-4.md)
 - [Checkpoint 5 learning record](docs/learning/checkpoint-5.md)
 - [Checkpoint 6 learning record](docs/learning/checkpoint-6.md)
+- [Checkpoint 7 learning record](docs/learning/checkpoint-7.md)
 - [Architecture decision: direct local Ollama boundary](docs/decisions/0001-direct-local-ollama-boundary.md)
 - [Original Notion guide](Local%20Personal%20File%20Agent%20060c2786553b82208d268122f958b13d.md)
 - [Persistent collaboration guidance](AGENTS.md)

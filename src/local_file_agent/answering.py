@@ -350,6 +350,25 @@ def answer_database(
     """Retrieve local evidence, generate one answer, and validate every citation."""
 
     database_run = run_database_search(database, question, gateway, options=options)
+    return answer_from_search(
+        database_run,
+        gateway,
+        answer_model,
+        include_context=include_context,
+        context_character_limit=context_character_limit,
+    )
+
+
+def answer_from_search(
+    database_run: DatabaseSearchRun,
+    gateway: AnswerGateway,
+    answer_model: str,
+    *,
+    include_context: bool = False,
+    context_character_limit: int = MAX_CONTEXT_CHARACTERS,
+) -> AnswerReport:
+    """Generate from an existing search run while retaining its ranked evidence for evaluation."""
+
     if not database_run.search.results:
         return _report(
             database_run,

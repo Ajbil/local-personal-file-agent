@@ -31,5 +31,6 @@ For each checkpoint:
 - [Checkpoint 4 — SQLite vector index](checkpoint-4.md)
 - [Checkpoint 5 — Read-only vector search](checkpoint-5.md)
 - [Checkpoint 6 — Grounded answers and trusted citations](checkpoint-6.md)
+- [Checkpoint 7 — Evaluation and security regression suite](checkpoint-7.md)
 
 Commands target Windows PowerShell because Windows is the project's baseline platform.
